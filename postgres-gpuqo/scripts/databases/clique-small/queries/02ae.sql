@@ -1,0 +1,1 @@
+SELECT * FROM T24, T39 WHERE T24.t39 = T39.pk; -- 2

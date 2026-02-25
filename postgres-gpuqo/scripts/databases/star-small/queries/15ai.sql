@@ -1,0 +1,1 @@
+SELECT * FROM T11, T6, T22, T39, T25, T9, T23, T1, T17, T28, T14, T33, T3, T36, T0 WHERE T0.t11 = T11.pk AND T0.t6 = T6.pk AND T0.t22 = T22.pk AND T0.t39 = T39.pk AND T0.t25 = T25.pk AND T0.t9 = T9.pk AND T0.t23 = T23.pk AND T0.t1 = T1.pk AND T0.t17 = T17.pk AND T0.t28 = T28.pk AND T0.t14 = T14.pk AND T0.t33 = T33.pk AND T0.t3 = T3.pk AND T0.t36 = T36.pk; -- 15
