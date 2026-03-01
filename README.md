@@ -98,11 +98,37 @@ createdb select5_demo
 psql -d select5_demo -f sqlite/select5.test
 ```
 
-## Usage (TODO)
+## Benchmark Harness (GUC-driven, minimal v0)
 
-A fuller end-to-end usage section will be added later, including:
+This repository includes a minimal harness for running the same workload under multiple **GUC sets** and collecting:
 
-- repeatable dataset bootstrap helpers
-- batch execution scripts
-- plan capture conventions (`EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON)`)
-- unified result collection format
+- `planning_ms` from `EXPLAIN (SUMMARY)`
+- `total_ms` from `psql \timing`
+- `execution_ms = total_ms - planning_ms`
+
+Results are written to `results/<run_id>/{raw.csv,summary.csv,run.json}`.
+
+### Example: `sqlite_select5`
+
+```bash
+python3 bench/bench.py prepare sqlite_select5 select5_bench
+
+python3 bench/bench.py run sqlite_select5 select5_bench \
+  --algo dp:geqo=off \
+  --algo geqo:geqo=on,geqo_threshold=2
+```
+
+### Example: JOB (requires IMDB CSVs)
+
+```bash
+python3 bench/bench.py prepare job job_bench --csv-dir /absolute/path/to/imdb_csv
+
+python3 bench/bench.py run job job_bench \
+  --algo dp:geqo=off \
+  --algo geqo:geqo=on,geqo_threshold=2 \
+  --min-join 12 --limit 20
+```
+
+Notes:
+- `join_size` is taken from `meta/query_manifest.csv` (regenerate via `python3 tools/build_query_manifest.py --verify --summary`).
+- Defaults: 3 repetitions; `min_join` defaults to 20 for `sqlite_select5` and `gpuqo_snowflake_small`, otherwise 12.
