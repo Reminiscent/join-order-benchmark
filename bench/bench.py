@@ -247,11 +247,6 @@ def prepare(dataset: str, db: str, csv_dir: Optional[str]) -> None:
         # Recommended for IMDB schema workloads; applied after load for faster ingest.
         psql_file(db, index_sql, check=True)
 
-    # Prep step to stabilize later timings.
-    psql_sql(db, "VACUUM FREEZE ANALYZE;", check=True)
-    # CHECKPOINT might require special privileges; ignore errors.
-    psql_sql(db, "CHECKPOINT;", check=False)
-
 
 def get_postgres_version(db: str) -> str:
     p = run_cmd(psql_cmd(db) + ["-At"], input_text="SELECT version();\n", check=True)
@@ -529,4 +524,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
