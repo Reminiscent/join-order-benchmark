@@ -40,11 +40,7 @@ Where possible, each benchmark now follows the same execution contract:
 
 IMDB-derived suites sharing one schema/load path:
 
-- `job/` (JOB): 113 queries
-- `job_extended/` (Neo): 24 queries
-- `job_d/` (HybridQO): 20,000 queries
 - `ceb-imdb-3k/` (Flow-Loss/CEB): 3,133 queries
-- `ceb-imdb-13k/` (Flow-Loss/CEB full): 13,646 queries
 
 ### 4) `sqlite/`
 
@@ -58,6 +54,33 @@ IMDB-derived suites sharing one schema/load path:
 - Source: gpuqo synthetic workload generators (SIGMOD 2022 project)
 - Kept subsets: `chain-small`, `clique-small`, `star-small`, `snowflake-small`
 - Strength: controllable synthetic join graph shapes
+
+## Query Metadata (`join_size`)
+
+Join-order algorithms diverge most when the join search space is large. To make this explicit, the repo provides a
+global query manifest with `join_size` (number of relations in the top-level `FROM` clause):
+
+- `meta/query_manifest.csv`
+- Regenerate with: `python3 tools/build_query_manifest.py --verify --summary`
+
+## Large-Join First Guidance
+
+If the goal is to stress join enumeration and join-order selection (instead of spending time on many small joins),
+start with:
+
+- `sqlite_select5` with `join_size >= 20` (lots of 20..64-way joins, self-contained)
+- `gpuqo_snowflake_small` with `join_size >= 20` (controllable synthetic schema with 20..40-way joins)
+- `job` and `job_complex` filtered to `join_size >= 12` (realistic IMDB-schema sanity checks; max join size <= 17/16)
+
+`meta/query_manifest.csv` makes it easy to filter/stratify by join size and avoid accidentally mixing in lots of
+small joins when comparing DP vs GEQO-threshold behavior.
+
+## Why Some Suites Were Removed
+
+- Redundant: a duplicate copy of JOB under `imdb_pg_dataset/job/` was removed (same queries, different formatting).
+- Not large-join-extending: suites like JOB-D and CEB-13k add many queries but do not increase max join size.
+- Repo usability: removing huge directories reduces checkout size and makes analysis/benchmark iteration practical.
+- Recoverability: removed suites remain available via git history (and their upstream sources) if needed later.
 
 ## Quick Start (PostgreSQL)
 

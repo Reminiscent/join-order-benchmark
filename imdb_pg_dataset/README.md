@@ -1,10 +1,11 @@
 # IMDB-Derived Query Suites
 
-This directory collects multiple IMDB-based SQL benchmark suites used in join-order and cardinality-estimation research.
+This directory contains a curated IMDB-based SQL suite used in join-order and cardinality-estimation research.
 
 ## Purpose
 
-Use these workloads to compare optimizer behavior across related but differently distributed query families while keeping one shared schema and data-loading path.
+Use these queries as an IMDB-schema workload that is easy to keep in-tree (moderate size) while still being
+representative for optimizer/cardinality work.
 
 ## Shared Execution Layout
 
@@ -14,11 +15,18 @@ Use these workloads to compare optimizer behavior across related but differently
 
 ## Included Suites
 
-- `job/`: classic JOB (113 queries)
-- `job_extended/`: extended JOB from Neo (24 queries)
-- `job_d/`: JOB-D from HybridQO (20,000 queries)
 - `ceb-imdb-3k/`: CEB "unique plans" subset (3,133 SQL files)
-- `ceb-imdb-13k/`: full CEB set (13,646 SQL files)
+
+## Removed Suites (Rationale)
+
+To keep this repository focused on large-join benchmarking and practical iteration, the following suites were removed:
+
+- `job/`: duplicate of `join-order-benchmark/` (same queries, different formatting)
+- `job_extended/`: no >=12-way joins (max join size 11)
+- `job_d/`: very large file count but join sizes still capped at 17
+- `ceb-imdb-13k/`: very large file count but join sizes still capped at 16
+
+They remain available via git history (and their upstream sources) if needed.
 
 ## How To Run (PostgreSQL)
 
@@ -26,7 +34,5 @@ Use these workloads to compare optimizer behavior across related but differently
    - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/imdb_pg_dataset/schema.sql`
 2. Load IMDB CSV data:
    - `psql -d <db> -v csv_dir=/absolute/path/to/imdb_csv -f /Users/yanchengpeng/projects/oss/join_order_benchmark/imdb_pg_dataset/load.sql`
-3. Run a query file from any suite:
-   - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/imdb_pg_dataset/job/1a.sql`
-   - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/imdb_pg_dataset/job_d/00001.sql`
-
+3. Run a query file:
+   - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/imdb_pg_dataset/ceb-imdb-3k/1a/1a1.sql`
