@@ -333,6 +333,7 @@ def run_bench(
     db: str,
     algos: list[Algo],
     min_join: Optional[int],
+    max_join: Optional[int],
     max_queries: Optional[int],
     *,
     reps: int = 3,
@@ -343,17 +344,28 @@ def run_bench(
         die(f"--reps must be >= 1 (got {reps})")
     if min_join is not None and min_join <= 0:
         die(f"--min-join must be >= 1 (got {min_join})")
+    if max_join is not None and max_join <= 0:
+        die(f"--max-join must be >= 1 (got {max_join})")
+    if min_join is not None and max_join is not None and min_join > max_join:
+        die(f"--min-join must be <= --max-join (got {min_join} > {max_join})")
 
     queries = parse_manifest(dataset)
 
     mj = min_join
+    xj = max_join
     if mj is not None:
         queries = [q for q in queries if q.join_size >= mj]
+    if xj is not None:
+        queries = [q for q in queries if q.join_size <= xj]
     if max_queries is not None:
         queries = queries[:max_queries]
     if not queries:
         mj_desc = str(mj) if mj is not None else "all"
-        die(f"no queries selected (dataset={dataset}, min_join={mj_desc}, max_queries={max_queries})")
+        xj_desc = str(xj) if xj is not None else "all"
+        die(
+            f"no queries selected (dataset={dataset}, min_join={mj_desc}, "
+            f"max_join={xj_desc}, max_queries={max_queries})"
+        )
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = REPO_ROOT / "results" / run_id
@@ -367,6 +379,7 @@ def run_bench(
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "postgres_version": version,
         "min_join": mj,
+        "max_join": xj,
         "max_queries": max_queries,
         "algos": [{"name": a.name, "gucs": [{k: v} for k, v in a.gucs]} for a in algos],
         "repetitions": reps,
@@ -378,9 +391,11 @@ def run_bench(
     summary_path = out_dir / "summary.csv"
 
     mj_desc = str(mj) if mj is not None else "all"
+    xj_desc = str(xj) if xj is not None else "all"
     print(
         f"[run] dataset={dataset} db={db} queries={len(queries)} "
-        f"algos={len(algos)} reps={reps} min_join={mj_desc} stabilize={stabilize}"
+        f"algos={len(algos)} reps={reps} min_join={mj_desc} max_join={xj_desc} "
+        f"stabilize={stabilize}"
     )
     print(f"[run] writing results to: {out_dir}")
 
@@ -564,6 +579,7 @@ def main() -> None:
     ap_run.add_argument("db", help="database name")
     ap_run.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
     ap_run.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
+    ap_run.add_argument("--max-join", type=int, default=None, help="max join_size filter (default: no filter)")
     ap_run.add_argument("--reps", type=int, default=3, help="repetitions per (query, algo) (default: 3)")
     ap_run.add_argument(
         "--stabilize",
@@ -581,6 +597,7 @@ def main() -> None:
     ap_smoke.add_argument("db", help="database name")
     ap_smoke.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
     ap_smoke.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
+    ap_smoke.add_argument("--max-join", type=int, default=None, help="max join_size filter (default: no filter)")
     ap_smoke.add_argument(
         "--queries",
         type=int,
@@ -603,6 +620,7 @@ def main() -> None:
             args.db,
             algos,
             args.min_join,
+            args.max_join,
             None,
             reps=args.reps,
             stabilize=args.stabilize,
@@ -619,6 +637,7 @@ def main() -> None:
             args.db,
             algos,
             args.min_join,
+            args.max_join,
             args.queries,
             reps=1,
             stabilize="none",
