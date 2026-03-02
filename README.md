@@ -108,6 +108,9 @@ This repository includes a minimal harness for running the same workload under m
 
 Results are written to `results/<run_id>/{raw.csv,summary.csv,run.json}`.
 
+For an end-to-end MVP walkthrough (prepare + smoke run across all datasets, including host/port connection params),
+see `docs/mvp_run.md`.
+
 ### Example: `sqlite_select5`
 
 ```bash
@@ -126,9 +129,14 @@ python3 bench/bench.py prepare job job_bench --csv-dir /absolute/path/to/imdb_cs
 python3 bench/bench.py run job job_bench \
   --algo dp:geqo=off \
   --algo geqo:geqo=on,geqo_threshold=2 \
-  --min-join 12 --limit 20
+  --min-join 12
+
+python3 bench/bench.py smoke job job_bench \
+  --algo dp:geqo=off \
+  --algo geqo:geqo=on,geqo_threshold=2
 ```
 
 Notes:
 - `join_size` is taken from `meta/query_manifest.csv` (regenerate via `python3 tools/build_query_manifest.py --verify --summary`).
-- Defaults: 3 repetitions; `min_join` defaults to 20 for `sqlite_select5` and `gpuqo_snowflake_small`, otherwise 12.
+- Defaults: `run` uses 3 repetitions and no query filter unless you pass `--min-join`.
+- `smoke` is a lightweight check (`--queries 1`, `reps=1`, `stabilize=none`).

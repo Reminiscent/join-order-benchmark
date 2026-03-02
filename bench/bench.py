@@ -26,11 +26,6 @@ WRAP_COUNT_DATASETS = {
     "gpuqo_snowflake_small",
 }
 
-DEFAULT_MIN_JOIN = {
-    "sqlite_select5": 20,
-    "gpuqo_snowflake_small": 20,
-}
-
 
 @dataclass(frozen=True)
 class QueryMeta:
@@ -45,6 +40,23 @@ class QueryMeta:
 class Algo:
     name: str
     gucs: list[tuple[str, str]]  # (key, value) emitted verbatim into SET
+
+
+@dataclass(frozen=True)
+class ConnOpts:
+    host: Optional[str] = None
+    port: Optional[int] = None
+    user: Optional[str] = None
+
+    def to_args(self) -> list[str]:
+        args: list[str] = []
+        if self.host:
+            args.extend(["-h", self.host])
+        if self.port is not None:
+            args.extend(["-p", str(self.port)])
+        if self.user:
+            args.extend(["-U", self.user])
+        return args
 
 
 SELECT5_HEADER_RE = re.compile(r"^--\s*query\s+(\d+)\s+\((.*?)\)\s*$", flags=re.IGNORECASE)
@@ -65,26 +77,36 @@ def run_cmd(cmd: list[str], *, input_text: Optional[str] = None, check: bool = F
     return p
 
 
-def psql_cmd(db: str) -> list[str]:
+def psql_cmd(db: str, conn: Optional[ConnOpts] = None) -> list[str]:
     # -X: no ~/.psqlrc, -q: quiet, pager off for stable parsing/logging.
-    return ["psql", "-X", "-q", "-P", "pager=off", "-v", "ON_ERROR_STOP=1", "-d", db]
+    c = conn or ConnOpts()
+    return ["psql", "-X", "-q", "-P", "pager=off", "-v", "ON_ERROR_STOP=1", *c.to_args(), "-d", db]
 
 
-def psql_sql(db: str, sql: str, *, check: bool = False) -> subprocess.CompletedProcess[str]:
-    return run_cmd(psql_cmd(db), input_text=sql, check=check)
+def psql_sql(db: str, sql: str, *, conn: Optional[ConnOpts] = None, check: bool = False) -> subprocess.CompletedProcess[str]:
+    return run_cmd(psql_cmd(db, conn), input_text=sql, check=check)
 
 
-def psql_file(db: str, path: Path, *, vars: Optional[dict[str, str]] = None, check: bool = False) -> subprocess.CompletedProcess[str]:
-    cmd = psql_cmd(db) + ["-f", str(path)]
+def psql_file(
+    db: str,
+    path: Path,
+    *,
+    conn: Optional[ConnOpts] = None,
+    vars: Optional[dict[str, str]] = None,
+    check: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    cmd = psql_cmd(db, conn) + ["-f", str(path)]
     if vars:
         for k, v in vars.items():
             cmd.extend(["-v", f"{k}={v}"])
     return run_cmd(cmd, check=check)
 
 
-def drop_and_create_db(db: str) -> None:
-    run_cmd(["dropdb", "--if-exists", db], check=False)
-    run_cmd(["createdb", db], check=True)
+def drop_and_create_db(db: str, conn: Optional[ConnOpts] = None) -> None:
+    c = conn or ConnOpts()
+    conn_args = c.to_args()
+    run_cmd(["dropdb", "--if-exists", *conn_args, db], check=False)
+    run_cmd(["createdb", *conn_args, db], check=True)
 
 
 def parse_manifest(dataset: str) -> list[QueryMeta]:
@@ -232,24 +254,24 @@ def dataset_prepare_scripts(dataset: str) -> tuple[Path, Path, Optional[Path], b
     die(f"dataset '{dataset}' is not supported by prepare")
 
 
-def prepare(dataset: str, db: str, csv_dir: Optional[str]) -> None:
+def prepare(dataset: str, db: str, csv_dir: Optional[str], conn: Optional[ConnOpts] = None) -> None:
     schema_sql, load_sql, index_sql, needs_csv_dir = dataset_prepare_scripts(dataset)
     if needs_csv_dir and not csv_dir:
         die(f"dataset '{dataset}' requires --csv-dir /absolute/path/to/imdb_csv")
 
-    drop_and_create_db(db)
+    drop_and_create_db(db, conn)
 
     print(f"[prepare] dataset={dataset} db={db}")
-    psql_file(db, schema_sql, check=True)
-    psql_file(db, load_sql, vars=({"csv_dir": csv_dir} if csv_dir else None), check=True)
+    psql_file(db, schema_sql, conn=conn, check=True)
+    psql_file(db, load_sql, conn=conn, vars=({"csv_dir": csv_dir} if csv_dir else None), check=True)
 
     if index_sql is not None:
         # Recommended for IMDB schema workloads; applied after load for faster ingest.
-        psql_file(db, index_sql, check=True)
+        psql_file(db, index_sql, conn=conn, check=True)
 
 
-def get_postgres_version(db: str) -> str:
-    p = run_cmd(psql_cmd(db) + ["-At"], input_text="SELECT version();\n", check=True)
+def get_postgres_version(db: str, conn: Optional[ConnOpts] = None) -> str:
+    p = run_cmd(psql_cmd(db, conn) + ["-At"], input_text="SELECT version();\n", check=True)
     return (p.stdout or "").strip()
 
 
@@ -275,7 +297,7 @@ def build_statement(dataset: str, sql: str) -> str:
     return ensure_semicolon(sql)
 
 
-def run_one(db: str, algo: Algo, stmt: str) -> tuple[float, float]:
+def run_one(db: str, algo: Algo, stmt: str, conn: Optional[ConnOpts] = None) -> tuple[float, float]:
     set_lines = "\n".join([f"SET {k} = {v};" for k, v in algo.gucs])
     script = "\n".join(
         [
@@ -289,7 +311,7 @@ def run_one(db: str, algo: Algo, stmt: str) -> tuple[float, float]:
             "",
         ]
     )
-    p = psql_sql(db, script, check=False)
+    p = psql_sql(db, script, conn=conn, check=False)
     out = (p.stdout or "") + (p.stderr or "")
     if p.returncode != 0:
         raise RuntimeError(first_error_line(out) or "query failed")
@@ -306,21 +328,38 @@ def run_one(db: str, algo: Algo, stmt: str) -> tuple[float, float]:
     return planning_ms, total_ms
 
 
-def run_bench(dataset: str, db: str, algos: list[Algo], min_join: Optional[int], limit: Optional[int]) -> None:
+def run_bench(
+    dataset: str,
+    db: str,
+    algos: list[Algo],
+    min_join: Optional[int],
+    max_queries: Optional[int],
+    *,
+    reps: int = 3,
+    stabilize: str = "vacuum_freeze_analyze",
+    conn: Optional[ConnOpts] = None,
+) -> None:
+    if reps <= 0:
+        die(f"--reps must be >= 1 (got {reps})")
+    if min_join is not None and min_join <= 0:
+        die(f"--min-join must be >= 1 (got {min_join})")
+
     queries = parse_manifest(dataset)
 
-    mj = min_join if min_join is not None else DEFAULT_MIN_JOIN.get(dataset, 12)
-    queries = [q for q in queries if q.join_size >= mj]
-    if limit is not None:
-        queries = queries[:limit]
+    mj = min_join
+    if mj is not None:
+        queries = [q for q in queries if q.join_size >= mj]
+    if max_queries is not None:
+        queries = queries[:max_queries]
     if not queries:
-        die(f"no queries selected (dataset={dataset}, min_join={mj}, limit={limit})")
+        mj_desc = str(mj) if mj is not None else "all"
+        die(f"no queries selected (dataset={dataset}, min_join={mj_desc}, max_queries={max_queries})")
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     out_dir = REPO_ROOT / "results" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    version = get_postgres_version(db)
+    version = get_postgres_version(db, conn)
     run_cfg = {
         "run_id": run_id,
         "dataset": dataset,
@@ -328,21 +367,34 @@ def run_bench(dataset: str, db: str, algos: list[Algo], min_join: Optional[int],
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "postgres_version": version,
         "min_join": mj,
-        "limit": limit,
+        "max_queries": max_queries,
         "algos": [{"name": a.name, "gucs": [{k: v} for k, v in a.gucs]} for a in algos],
-        "repetitions": 3,
+        "repetitions": reps,
+        "stabilize": stabilize,
     }
     (out_dir / "run.json").write_text(json.dumps(run_cfg, indent=2, sort_keys=True) + "\n")
 
     raw_path = out_dir / "raw.csv"
     summary_path = out_dir / "summary.csv"
 
-    print(f"[run] dataset={dataset} db={db} queries={len(queries)} algos={len(algos)} reps=3 min_join={mj}")
+    mj_desc = str(mj) if mj is not None else "all"
+    print(
+        f"[run] dataset={dataset} db={db} queries={len(queries)} "
+        f"algos={len(algos)} reps={reps} min_join={mj_desc} stabilize={stabilize}"
+    )
     print(f"[run] writing results to: {out_dir}")
 
     # Stability prelude (once per run).
-    psql_sql(db, "VACUUM FREEZE ANALYZE;", check=True)
-    psql_sql(db, "CHECKPOINT;", check=False)
+    if stabilize == "vacuum_freeze_analyze":
+        psql_sql(db, "VACUUM FREEZE ANALYZE;", conn=conn, check=True)
+        psql_sql(db, "CHECKPOINT;", conn=conn, check=False)
+    elif stabilize == "analyze":
+        psql_sql(db, "ANALYZE;", conn=conn, check=True)
+        psql_sql(db, "CHECKPOINT;", conn=conn, check=False)
+    elif stabilize == "none":
+        pass
+    else:
+        die(f"unknown --stabilize mode: {stabilize}")
 
     if dataset == "sqlite_select5":
         select5_path = REPO_ROOT / "sqlite" / "queries" / "select5.sql"
@@ -369,7 +421,7 @@ def run_bench(dataset: str, db: str, algos: list[Algo], min_join: Optional[int],
 
         for algo in algos:
             key = (q.query_id, algo.name)
-            for rep in range(1, 4):
+            for rep in range(1, reps + 1):
                 status = "ok"
                 err = ""
                 planning_ms = -1.0
@@ -377,7 +429,7 @@ def run_bench(dataset: str, db: str, algos: list[Algo], min_join: Optional[int],
                 exec_ms = -1.0
 
                 try:
-                    planning_ms, total_ms = run_one(db, algo, stmt)
+                    planning_ms, total_ms = run_one(db, algo, stmt, conn)
                     exec_ms = max(total_ms - planning_ms, 0.0)
                 except Exception as e:
                     status = "error"
@@ -496,27 +548,82 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Minimal GUC-driven join-order benchmark harness (PostgreSQL).")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    def add_conn_args(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--host", default=None, help="PostgreSQL host (e.g. localhost)")
+        p.add_argument("--port", type=int, default=None, help="PostgreSQL port (e.g. 54321)")
+        p.add_argument("--user", default=None, help="PostgreSQL user (optional)")
+
     ap_prep = sub.add_parser("prepare", help="Drop/create DB and load a dataset.")
     ap_prep.add_argument("dataset", help="dataset id (must exist in meta/query_manifest.csv)")
     ap_prep.add_argument("db", help="database name")
     ap_prep.add_argument("--csv-dir", default=None, help="IMDB CSV directory for JOB/CEB datasets")
+    add_conn_args(ap_prep)
 
     ap_run = sub.add_parser("run", help="Run queries under one or more GUC sets and write CSV results.")
     ap_run.add_argument("dataset", help="dataset id (must exist in meta/query_manifest.csv)")
     ap_run.add_argument("db", help="database name")
     ap_run.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
-    ap_run.add_argument("--min-join", type=int, default=None, help="min join_size filter (default depends on dataset)")
-    ap_run.add_argument("--limit", type=int, default=None, help="limit number of queries (deterministic)")
+    ap_run.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
+    ap_run.add_argument("--reps", type=int, default=3, help="repetitions per (query, algo) (default: 3)")
+    ap_run.add_argument(
+        "--stabilize",
+        choices=["vacuum_freeze_analyze", "analyze", "none"],
+        default="vacuum_freeze_analyze",
+        help="stability prelude before running queries (default: vacuum_freeze_analyze)",
+    )
+    add_conn_args(ap_run)
+
+    ap_smoke = sub.add_parser(
+        "smoke",
+        help="Quick smoke run: light defaults for connectivity and query execution checks.",
+    )
+    ap_smoke.add_argument("dataset", help="dataset id (must exist in meta/query_manifest.csv)")
+    ap_smoke.add_argument("db", help="database name")
+    ap_smoke.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
+    ap_smoke.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
+    ap_smoke.add_argument(
+        "--queries",
+        type=int,
+        default=1,
+        help="number of selected queries to run for smoke check (default: 1)",
+    )
+    add_conn_args(ap_smoke)
 
     args = ap.parse_args()
+    conn = ConnOpts(host=args.host, port=args.port, user=args.user)
 
     if args.cmd == "prepare":
-        prepare(args.dataset, args.db, args.csv_dir)
+        prepare(args.dataset, args.db, args.csv_dir, conn)
         return
 
     if args.cmd == "run":
         algos = [parse_algo(s) for s in args.algo]
-        run_bench(args.dataset, args.db, algos, args.min_join, args.limit)
+        run_bench(
+            args.dataset,
+            args.db,
+            algos,
+            args.min_join,
+            None,
+            reps=args.reps,
+            stabilize=args.stabilize,
+            conn=conn,
+        )
+        return
+
+    if args.cmd == "smoke":
+        if args.queries <= 0:
+            die(f"--queries must be >= 1 (got {args.queries})")
+        algos = [parse_algo(s) for s in args.algo]
+        run_bench(
+            args.dataset,
+            args.db,
+            algos,
+            args.min_join,
+            args.queries,
+            reps=1,
+            stabilize="none",
+            conn=conn,
+        )
         return
 
     die(f"unknown command: {args.cmd}")
