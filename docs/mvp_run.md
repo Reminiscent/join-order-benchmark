@@ -215,3 +215,22 @@ rg \",error,\" results/*/raw.csv
 - IMDB：建议 `--min-join 12`（join 更宽，更容易拉开 join order 的差异）
 - `sqlite_select5` / `gpuqo_snowflake_small`：join 很宽（20..64 / up to 40），`dp` 可能非常慢
   - 可以先只跑 `geqo + goo_*`，或者把 `--min-join` 调小到 12/16 再加上 `dp`
+
+如果 `imdb_ceb_3k` 全量太慢，可以用子集文件：
+
+- 子集目录：`meta/subsets/imdb_ceb_3k/`
+- 重新生成：`python3 tools/build_imdb_ceb_subsets.py`
+- 示例（600 条分层子集）：
+
+```bash
+python3 bench/bench.py run imdb_ceb_3k imdb_mvp \
+  --host localhost --port 54321 \
+  --query-id-file meta/subsets/imdb_ceb_3k/stratified_600.txt \
+  --dedupe-sql \
+  --algo "dp:geqo_threshold=100,enable_goo_join_search=off" \
+  --algo "geqo:geqo_threshold=2,enable_goo_join_search=off" \
+  --algo "goo_cost:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=cost" \
+  --algo "goo_result_size:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=result_size" \
+  --algo "goo_selectivity:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=selectivity" \
+  --algo "goo_combined:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=combined"
+```

@@ -34,6 +34,7 @@ class QueryMeta:
     query_path: str
     query_label: str
     join_size: int
+    sql_sha1: str
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,7 @@ def parse_manifest(dataset: str) -> list[QueryMeta]:
                     query_path=row["query_path"],
                     query_label=row.get("query_label", "") or "",
                     join_size=join_size,
+                    sql_sha1=row.get("sql_sha1", "") or "",
                 )
             )
     if not out:
@@ -328,6 +330,20 @@ def run_one(db: str, algo: Algo, stmt: str, conn: Optional[ConnOpts] = None) -> 
     return planning_ms, total_ms
 
 
+def parse_query_id_file(path: Path) -> list[str]:
+    if not path.is_file():
+        die(f"--query-id-file not found: {path}")
+    out: list[str] = []
+    for raw in path.read_text(errors="ignore").splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        out.append(s)
+    if not out:
+        die(f"--query-id-file has no usable ids: {path}")
+    return out
+
+
 def run_bench(
     dataset: str,
     db: str,
@@ -336,6 +352,8 @@ def run_bench(
     max_join: Optional[int],
     max_queries: Optional[int],
     *,
+    query_id_file: Optional[Path] = None,
+    dedupe_sql: bool = False,
     reps: int = 3,
     stabilize: str = "vacuum_freeze_analyze",
     conn: Optional[ConnOpts] = None,
@@ -350,6 +368,16 @@ def run_bench(
         die(f"--min-join must be <= --max-join (got {min_join} > {max_join})")
 
     queries = parse_manifest(dataset)
+    qid_keep: Optional[set[str]] = None
+    if query_id_file is not None:
+        qids = parse_query_id_file(query_id_file)
+        qid_keep = set(qids)
+        known = {q.query_id for q in queries}
+        missing = sorted([x for x in qid_keep if x not in known])
+        if missing:
+            sample = ", ".join(missing[:8])
+            die(f"--query-id-file includes unknown query_id(s) for dataset '{dataset}': {sample}")
+        queries = [q for q in queries if q.query_id in qid_keep]
 
     mj = min_join
     xj = max_join
@@ -357,6 +385,21 @@ def run_bench(
         queries = [q for q in queries if q.join_size >= mj]
     if xj is not None:
         queries = [q for q in queries if q.join_size <= xj]
+
+    dedup_removed = 0
+    if dedupe_sql:
+        seen: set[str] = set()
+        kept: list[QueryMeta] = []
+        for q in queries:
+            # sql_sha1 comes from manifest canonicalization and is stable across formatting diffs.
+            key = q.sql_sha1 or f"{q.query_path}:{q.query_id}"
+            if key in seen:
+                dedup_removed += 1
+                continue
+            seen.add(key)
+            kept.append(q)
+        queries = kept
+
     if max_queries is not None:
         queries = queries[:max_queries]
     if not queries:
@@ -381,6 +424,9 @@ def run_bench(
         "min_join": mj,
         "max_join": xj,
         "max_queries": max_queries,
+        "query_id_file": str(query_id_file) if query_id_file is not None else None,
+        "dedupe_sql": dedupe_sql,
+        "dedup_removed": dedup_removed,
         "algos": [{"name": a.name, "gucs": [{k: v} for k, v in a.gucs]} for a in algos],
         "repetitions": reps,
         "stabilize": stabilize,
@@ -395,7 +441,7 @@ def run_bench(
     print(
         f"[run] dataset={dataset} db={db} queries={len(queries)} "
         f"algos={len(algos)} reps={reps} min_join={mj_desc} max_join={xj_desc} "
-        f"stabilize={stabilize}"
+        f"stabilize={stabilize} dedupe_sql={'on' if dedupe_sql else 'off'} dedup_removed={dedup_removed}"
     )
     print(f"[run] writing results to: {out_dir}")
 
@@ -578,8 +624,18 @@ def main() -> None:
     ap_run.add_argument("dataset", help="dataset id (must exist in meta/query_manifest.csv)")
     ap_run.add_argument("db", help="database name")
     ap_run.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
+    ap_run.add_argument(
+        "--query-id-file",
+        default=None,
+        help="text file with one query_id per line (comments with # are allowed)",
+    )
     ap_run.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
     ap_run.add_argument("--max-join", type=int, default=None, help="max join_size filter (default: no filter)")
+    ap_run.add_argument(
+        "--dedupe-sql",
+        action="store_true",
+        help="drop exact duplicate SQLs (by manifest sql_sha1) after filters",
+    )
     ap_run.add_argument("--reps", type=int, default=3, help="repetitions per (query, algo) (default: 3)")
     ap_run.add_argument(
         "--stabilize",
@@ -596,8 +652,18 @@ def main() -> None:
     ap_smoke.add_argument("dataset", help="dataset id (must exist in meta/query_manifest.csv)")
     ap_smoke.add_argument("db", help="database name")
     ap_smoke.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
+    ap_smoke.add_argument(
+        "--query-id-file",
+        default=None,
+        help="text file with one query_id per line (comments with # are allowed)",
+    )
     ap_smoke.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
     ap_smoke.add_argument("--max-join", type=int, default=None, help="max join_size filter (default: no filter)")
+    ap_smoke.add_argument(
+        "--dedupe-sql",
+        action="store_true",
+        help="drop exact duplicate SQLs (by manifest sql_sha1) after filters",
+    )
     ap_smoke.add_argument(
         "--queries",
         type=int,
@@ -622,6 +688,8 @@ def main() -> None:
             args.min_join,
             args.max_join,
             None,
+            query_id_file=Path(args.query_id_file) if args.query_id_file else None,
+            dedupe_sql=args.dedupe_sql,
             reps=args.reps,
             stabilize=args.stabilize,
             conn=conn,
@@ -639,6 +707,8 @@ def main() -> None:
             args.min_join,
             args.max_join,
             args.queries,
+            query_id_file=Path(args.query_id_file) if args.query_id_file else None,
+            dedupe_sql=args.dedupe_sql,
             reps=1,
             stabilize="none",
             conn=conn,
