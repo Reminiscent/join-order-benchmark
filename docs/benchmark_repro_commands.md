@@ -109,6 +109,25 @@ python3 bench/bench.py run imdb_ceb_3k imdb_mvp \
   --algo "goo_combined:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=combined"
 ```
 
+Example (full CEB by join-size batches):
+
+```bash
+for j in 6 7 9 10 11 12 14 16; do
+  python3 bench/bench.py run imdb_ceb_3k imdb_mvp \
+    --host localhost --port 54321 \
+    --reps 1 \
+    --min-join "$j" --max-join "$j" \
+    --stabilize vacuum_freeze_analyze \
+    --statement-timeout-ms 600000 \
+    --algo "dp:geqo_threshold=100,enable_goo_join_search=off" \
+    --algo "geqo:geqo_threshold=2,enable_goo_join_search=off" \
+    --algo "goo_cost:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=cost" \
+    --algo "goo_result_size:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=result_size" \
+    --algo "goo_selectivity:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=selectivity" \
+    --algo "goo_combined:geqo_threshold=2,enable_goo_join_search=on,goo_greedy_strategy=combined"
+done
+```
+
 ## 5) Timeout/skip behavior
 
 - Timeout is per statement via `SET statement_timeout = 600000`.
