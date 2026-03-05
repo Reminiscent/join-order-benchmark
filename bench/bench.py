@@ -353,6 +353,8 @@ def run_bench(
 ) -> None:
     if reps <= 0:
         die(f"--reps must be >= 1 (got {reps})")
+    if max_queries is not None and max_queries <= 0:
+        die(f"--max-queries must be >= 1 (got {max_queries})")
     if statement_timeout_ms is not None and statement_timeout_ms < 0:
         die(f"--statement-timeout-ms must be >= 0 (got {statement_timeout_ms})")
     if min_join is not None and min_join <= 0:
@@ -600,6 +602,7 @@ def main() -> None:
     ap_run.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
     ap_run.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
     ap_run.add_argument("--max-join", type=int, default=None, help="max join_size filter (default: no filter)")
+    ap_run.add_argument("--max-queries", type=int, default=None, help="limit number of selected queries")
     ap_run.add_argument("--reps", type=int, default=3, help="repetitions per (query, algo) (default: 3)")
     ap_run.add_argument(
         "--statement-timeout-ms",
@@ -653,7 +656,7 @@ def main() -> None:
             algos,
             args.min_join,
             args.max_join,
-            None,
+            args.max_queries,
             reps=args.reps,
             stabilize=args.stabilize,
             conn=conn,
