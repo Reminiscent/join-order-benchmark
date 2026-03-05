@@ -297,11 +297,21 @@ def build_statement(dataset: str, sql: str) -> str:
     return ensure_semicolon(sql)
 
 
-def run_one(db: str, algo: Algo, stmt: str, conn: Optional[ConnOpts] = None) -> tuple[float, float]:
+def run_one(
+    db: str,
+    algo: Algo,
+    stmt: str,
+    conn: Optional[ConnOpts] = None,
+    statement_timeout_ms: Optional[int] = None,
+) -> tuple[float, float]:
     set_lines = "\n".join([f"SET {k} = {v};" for k, v in algo.gucs])
+    timeout_lines = []
+    if statement_timeout_ms is not None and statement_timeout_ms > 0:
+        timeout_lines.append(f"SET statement_timeout = {statement_timeout_ms};")
     script = "\n".join(
         [
             "RESET ALL;",
+            *timeout_lines,
             set_lines,
             f"EXPLAIN (SUMMARY) {stmt}",
             r"\timing on",
@@ -339,9 +349,12 @@ def run_bench(
     reps: int = 3,
     stabilize: str = "vacuum_freeze_analyze",
     conn: Optional[ConnOpts] = None,
+    statement_timeout_ms: Optional[int] = None,
 ) -> None:
     if reps <= 0:
         die(f"--reps must be >= 1 (got {reps})")
+    if statement_timeout_ms is not None and statement_timeout_ms < 0:
+        die(f"--statement-timeout-ms must be >= 0 (got {statement_timeout_ms})")
     if min_join is not None and min_join <= 0:
         die(f"--min-join must be >= 1 (got {min_join})")
     if max_join is not None and max_join <= 0:
@@ -384,6 +397,7 @@ def run_bench(
         "algos": [{"name": a.name, "gucs": [{k: v} for k, v in a.gucs]} for a in algos],
         "repetitions": reps,
         "stabilize": stabilize,
+        "statement_timeout_ms": statement_timeout_ms,
     }
     (out_dir / "run.json").write_text(json.dumps(run_cfg, indent=2, sort_keys=True) + "\n")
 
@@ -444,7 +458,13 @@ def run_bench(
                 exec_ms = -1.0
 
                 try:
-                    planning_ms, total_ms = run_one(db, algo, stmt, conn)
+                    planning_ms, total_ms = run_one(
+                        db,
+                        algo,
+                        stmt,
+                        conn,
+                        statement_timeout_ms=statement_timeout_ms,
+                    )
                     exec_ms = max(total_ms - planning_ms, 0.0)
                 except Exception as e:
                     status = "error"
@@ -582,6 +602,12 @@ def main() -> None:
     ap_run.add_argument("--max-join", type=int, default=None, help="max join_size filter (default: no filter)")
     ap_run.add_argument("--reps", type=int, default=3, help="repetitions per (query, algo) (default: 3)")
     ap_run.add_argument(
+        "--statement-timeout-ms",
+        type=int,
+        default=0,
+        help="PostgreSQL statement_timeout in milliseconds; 0 disables timeout (default: 0)",
+    )
+    ap_run.add_argument(
         "--stabilize",
         choices=["vacuum_freeze_analyze", "analyze", "none"],
         default="vacuum_freeze_analyze",
@@ -604,6 +630,12 @@ def main() -> None:
         default=1,
         help="number of selected queries to run for smoke check (default: 1)",
     )
+    ap_smoke.add_argument(
+        "--statement-timeout-ms",
+        type=int,
+        default=0,
+        help="PostgreSQL statement_timeout in milliseconds; 0 disables timeout (default: 0)",
+    )
     add_conn_args(ap_smoke)
 
     args = ap.parse_args()
@@ -625,6 +657,7 @@ def main() -> None:
             reps=args.reps,
             stabilize=args.stabilize,
             conn=conn,
+            statement_timeout_ms=args.statement_timeout_ms,
         )
         return
 
@@ -642,6 +675,7 @@ def main() -> None:
             reps=1,
             stabilize="none",
             conn=conn,
+            statement_timeout_ms=args.statement_timeout_ms,
         )
         return
 
