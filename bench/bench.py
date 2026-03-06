@@ -62,6 +62,7 @@ class ConnOpts:
 SELECT5_HEADER_RE = re.compile(r"^--\s*query\s+(\d+)\s+\((.*?)\)\s*$", flags=re.IGNORECASE)
 PLANNING_RE = re.compile(r"Planning Time:\s*([0-9.]+)\s*ms", flags=re.IGNORECASE)
 TIME_RE = re.compile(r"Time:\s*([0-9.]+)\s*ms", flags=re.IGNORECASE)
+SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def die(msg: str) -> None:
@@ -85,6 +86,20 @@ def psql_cmd(db: str, conn: Optional[ConnOpts] = None) -> list[str]:
 
 def psql_sql(db: str, sql: str, *, conn: Optional[ConnOpts] = None, check: bool = False) -> subprocess.CompletedProcess[str]:
     return run_cmd(psql_cmd(db, conn), input_text=sql, check=check)
+
+
+def psql_sql_raw(
+    db: str,
+    sql: str,
+    *,
+    conn: Optional[ConnOpts] = None,
+    extra_args: Optional[list[str]] = None,
+    check: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    cmd = psql_cmd(db, conn)
+    if extra_args:
+        cmd.extend(extra_args)
+    return run_cmd(cmd, input_text=sql, check=check)
 
 
 def psql_file(
@@ -297,6 +312,18 @@ def build_statement(dataset: str, sql: str) -> str:
     return ensure_semicolon(sql)
 
 
+def build_session_prelude(algo: Algo, statement_timeout_ms: Optional[int]) -> list[str]:
+    lines = ["RESET ALL;"]
+    if statement_timeout_ms is not None and statement_timeout_ms > 0:
+        lines.append(f"SET statement_timeout = {statement_timeout_ms};")
+    lines.extend(f"SET {k} = {v};" for k, v in algo.gucs)
+    return lines
+
+
+def safe_artifact_name(text: str) -> str:
+    return SAFE_NAME_RE.sub("_", text)
+
+
 def run_one(
     db: str,
     algo: Algo,
@@ -304,15 +331,9 @@ def run_one(
     conn: Optional[ConnOpts] = None,
     statement_timeout_ms: Optional[int] = None,
 ) -> tuple[float, float]:
-    set_lines = "\n".join([f"SET {k} = {v};" for k, v in algo.gucs])
-    timeout_lines = []
-    if statement_timeout_ms is not None and statement_timeout_ms > 0:
-        timeout_lines.append(f"SET statement_timeout = {statement_timeout_ms};")
     script = "\n".join(
         [
-            "RESET ALL;",
-            *timeout_lines,
-            set_lines,
+            *build_session_prelude(algo, statement_timeout_ms),
             f"EXPLAIN (SUMMARY) {stmt}",
             r"\timing on",
             r"\o /dev/null",
@@ -338,6 +359,48 @@ def run_one(
     return planning_ms, total_ms
 
 
+def capture_explain_analyze(
+    db: str,
+    algo: Algo,
+    query_id: str,
+    stmt: str,
+    artifact_dir: Path,
+    *,
+    conn: Optional[ConnOpts] = None,
+    statement_timeout_ms: Optional[int] = None,
+) -> tuple[str, str]:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    base = f"{safe_artifact_name(query_id)}__{safe_artifact_name(algo.name)}"
+    ok_path = artifact_dir / f"{base}.json"
+    err_path = artifact_dir / f"{base}.error.txt"
+    script = "\n".join(
+        [
+            *build_session_prelude(algo, statement_timeout_ms),
+            f"EXPLAIN (ANALYZE, FORMAT JSON, VERBOSE, BUFFERS, SETTINGS, SUMMARY) {stmt}",
+            "",
+        ]
+    )
+    p = psql_sql_raw(db, script, conn=conn, extra_args=["-A", "-t"], check=False)
+    stdout = p.stdout or ""
+    stderr = p.stderr or ""
+    out = stdout + stderr
+    if p.returncode != 0:
+        err_path.write_text(out)
+        if ok_path.exists():
+            ok_path.unlink()
+        return ("error", str(err_path.relative_to(REPO_ROOT)))
+    payload = stdout.strip()
+    if not payload:
+        err_path.write_text("missing EXPLAIN ANALYZE output\n" + out)
+        if ok_path.exists():
+            ok_path.unlink()
+        return ("error", str(err_path.relative_to(REPO_ROOT)))
+    ok_path.write_text(payload + "\n")
+    if err_path.exists():
+        err_path.unlink()
+    return ("ok", str(ok_path.relative_to(REPO_ROOT)))
+
+
 def run_bench(
     dataset: str,
     db: str,
@@ -351,6 +414,7 @@ def run_bench(
     stabilize: str = "vacuum_freeze_analyze",
     conn: Optional[ConnOpts] = None,
     statement_timeout_ms: Optional[int] = None,
+    capture_explain_analyze_json: bool = False,
 ) -> None:
     if reps <= 0:
         die(f"--reps must be >= 1 (got {reps})")
@@ -406,11 +470,16 @@ def run_bench(
         "repetitions": reps,
         "stabilize": stabilize,
         "statement_timeout_ms": statement_timeout_ms,
+        "capture_explain_analyze_json": capture_explain_analyze_json,
+        "explain_analyze_options": "ANALYZE, FORMAT JSON, VERBOSE, BUFFERS, SETTINGS, SUMMARY"
+        if capture_explain_analyze_json
+        else "",
     }
     (out_dir / "run.json").write_text(json.dumps(run_cfg, indent=2, sort_keys=True) + "\n")
 
     raw_path = out_dir / "raw.csv"
     summary_path = out_dir / "summary.csv"
+    explain_dir = out_dir / "explain_analyze"
 
     mj_desc = str(mj) if mj is not None else "all"
     xj_desc = str(xj) if xj is not None else "all"
@@ -443,6 +512,7 @@ def run_bench(
     raw_rows: list[dict[str, str]] = []
     # (query_id, algo) -> list of (planning_ms, total_ms, exec_ms, status)
     summary_acc: dict[tuple[str, str], list[tuple[float, float, float, str]]] = {}
+    explain_acc: dict[tuple[str, str], tuple[str, str]] = {}
 
     for q in queries:
         if dataset == "sqlite_select5":
@@ -499,6 +569,17 @@ def run_bench(
                 )
                 summary_acc.setdefault(key, []).append((planning_ms, total_ms, exec_ms, status))
 
+            if capture_explain_analyze_json:
+                explain_acc[key] = capture_explain_analyze(
+                    db,
+                    algo,
+                    q.query_id,
+                    stmt,
+                    explain_dir,
+                    conn=conn,
+                    statement_timeout_ms=statement_timeout_ms,
+                )
+
     with raw_path.open("w", newline="") as f:
         w = csv.DictWriter(
             f,
@@ -540,6 +621,8 @@ def run_bench(
                 "execution_ms_min",
                 "ok_reps",
                 "err_reps",
+                "explain_analyze_status",
+                "explain_analyze_artifact",
             ],
             lineterminator="\n",
         )
@@ -547,6 +630,7 @@ def run_bench(
         for q in queries:
             for algo in algos:
                 vals = summary_acc.get((q.query_id, algo.name), [])
+                explain_status, explain_artifact = explain_acc.get((q.query_id, algo.name), ("", ""))
                 ok = [(p, t, e) for (p, t, e, s) in vals if s == "ok"]
                 ok_reps = len(ok)
                 err_reps = len(vals) - ok_reps
@@ -568,6 +652,8 @@ def run_bench(
                         "execution_ms_min": f"{exec_min:.3f}",
                         "ok_reps": str(ok_reps),
                         "err_reps": str(err_reps),
+                        "explain_analyze_status": explain_status,
+                        "explain_analyze_artifact": explain_artifact,
                     }
                 else:
                     row = {
@@ -584,6 +670,8 @@ def run_bench(
                         "execution_ms_min": "",
                         "ok_reps": "0",
                         "err_reps": str(err_reps),
+                        "explain_analyze_status": explain_status,
+                        "explain_analyze_artifact": explain_artifact,
                     }
                 w.writerow(row)
 
@@ -612,6 +700,11 @@ def main() -> None:
     ap_run.add_argument("--query-offset", type=int, default=0, help="skip the first N selected queries")
     ap_run.add_argument("--max-queries", type=int, default=None, help="limit number of selected queries")
     ap_run.add_argument("--reps", type=int, default=3, help="repetitions per (query, algo) (default: 3)")
+    ap_run.add_argument(
+        "--capture-explain-analyze-json",
+        action="store_true",
+        help="run one extra EXPLAIN ANALYZE (FORMAT JSON, VERBOSE, BUFFERS, SETTINGS, SUMMARY) per (query, algo)",
+    )
     ap_run.add_argument(
         "--statement-timeout-ms",
         type=int,
@@ -648,6 +741,11 @@ def main() -> None:
         default=0,
         help="PostgreSQL statement_timeout in milliseconds; 0 disables timeout (default: 0)",
     )
+    ap_smoke.add_argument(
+        "--capture-explain-analyze-json",
+        action="store_true",
+        help="run one extra EXPLAIN ANALYZE (FORMAT JSON, VERBOSE, BUFFERS, SETTINGS, SUMMARY) per (query, algo)",
+    )
     add_conn_args(ap_smoke)
 
     args = ap.parse_args()
@@ -671,6 +769,7 @@ def main() -> None:
             stabilize=args.stabilize,
             conn=conn,
             statement_timeout_ms=args.statement_timeout_ms,
+            capture_explain_analyze_json=args.capture_explain_analyze_json,
         )
         return
 
@@ -690,6 +789,7 @@ def main() -> None:
             stabilize="none",
             conn=conn,
             statement_timeout_ms=args.statement_timeout_ms,
+            capture_explain_analyze_json=args.capture_explain_analyze_json,
         )
         return
 
