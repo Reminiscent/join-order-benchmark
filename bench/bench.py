@@ -344,6 +344,7 @@ def run_bench(
     algos: list[Algo],
     min_join: Optional[int],
     max_join: Optional[int],
+    query_offset: int,
     max_queries: Optional[int],
     *,
     reps: int = 3,
@@ -363,6 +364,8 @@ def run_bench(
         die(f"--max-join must be >= 1 (got {max_join})")
     if min_join is not None and max_join is not None and min_join > max_join:
         die(f"--min-join must be <= --max-join (got {min_join} > {max_join})")
+    if query_offset < 0:
+        die(f"--query-offset must be >= 0 (got {query_offset})")
 
     queries = parse_manifest(dataset)
 
@@ -372,6 +375,8 @@ def run_bench(
         queries = [q for q in queries if q.join_size >= mj]
     if xj is not None:
         queries = [q for q in queries if q.join_size <= xj]
+    if query_offset:
+        queries = queries[query_offset:]
     if max_queries is not None:
         queries = queries[:max_queries]
     if not queries:
@@ -395,6 +400,7 @@ def run_bench(
         "postgres_version": version,
         "min_join": mj,
         "max_join": xj,
+        "query_offset": query_offset,
         "max_queries": max_queries,
         "algos": [{"name": a.name, "gucs": [{k: v} for k, v in a.gucs]} for a in algos],
         "repetitions": reps,
@@ -411,6 +417,7 @@ def run_bench(
     print(
         f"[run] dataset={dataset} db={db} queries={len(queries)} "
         f"algos={len(algos)} reps={reps} min_join={mj_desc} max_join={xj_desc} "
+        f"query_offset={query_offset} "
         f"stabilize={stabilize}"
     )
     print(f"[run] writing results to: {out_dir}")
@@ -602,6 +609,7 @@ def main() -> None:
     ap_run.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
     ap_run.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
     ap_run.add_argument("--max-join", type=int, default=None, help="max join_size filter (default: no filter)")
+    ap_run.add_argument("--query-offset", type=int, default=0, help="skip the first N selected queries")
     ap_run.add_argument("--max-queries", type=int, default=None, help="limit number of selected queries")
     ap_run.add_argument("--reps", type=int, default=3, help="repetitions per (query, algo) (default: 3)")
     ap_run.add_argument(
@@ -627,6 +635,7 @@ def main() -> None:
     ap_smoke.add_argument("--algo", action="append", required=True, help="name:key=value,key=value (repeatable)")
     ap_smoke.add_argument("--min-join", type=int, default=None, help="min join_size filter (default: no filter)")
     ap_smoke.add_argument("--max-join", type=int, default=None, help="max join_size filter (default: no filter)")
+    ap_smoke.add_argument("--query-offset", type=int, default=0, help="skip the first N selected queries")
     ap_smoke.add_argument(
         "--queries",
         type=int,
@@ -656,6 +665,7 @@ def main() -> None:
             algos,
             args.min_join,
             args.max_join,
+            args.query_offset,
             args.max_queries,
             reps=args.reps,
             stabilize=args.stabilize,
@@ -674,6 +684,7 @@ def main() -> None:
             algos,
             args.min_join,
             args.max_join,
+            args.query_offset,
             args.queries,
             reps=1,
             stabilize="none",
