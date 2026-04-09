@@ -1,38 +1,36 @@
-# IMDB-Derived Query Suites
+# IMDB-Derived Suites
 
-This directory contains a curated IMDB-based SQL suite used in join-order and cardinality-estimation research.
+This directory contains IMDB-based query suites that share the same IMDB schema and CSV load path.
 
-## Purpose
+## Summary
 
-Use these queries as an IMDB-schema workload that is easy to keep in-tree (moderate size) while still being
-representative for optimizer/cardinality work.
+- Included suite: `ceb-imdb-3k`
+- Query count: 3,133
+- Join size: 6 to 16
+- Type: real IMDB workload
+- Main use: larger IMDB campaign coverage beyond JOB and JOB-Complex
 
-## Shared Execution Layout
+## Files
 
-- `schema.sql`: imports the shared IMDB schema
-- `load.sql`: imports shared CSV loading script
-- Query suites live in subdirectories listed below
+- `schema.sql`
+  Imports the shared IMDB schema.
+- `load.sql`
+  Imports the shared IMDB CSV load script.
+- `ceb-imdb-3k/`
+  Query files for the CEB IMDB 3k subset.
 
-## Included Suites
+## External Data
 
-- `ceb-imdb-3k/`: CEB "unique plans" subset (3,133 SQL files)
+This workload requires the same external IMDB CSV bundle used by JOB.
 
-## Removed Suites (Rationale)
+Recommended download source:
 
-To keep this repository focused on large-join benchmarking and practical iteration, the following suites were removed:
+- [https://bonsai.cedardb.com/job/imdb.tgz](https://bonsai.cedardb.com/job/imdb.tgz)
 
-- `job/`: duplicate of `join-order-benchmark/` (same queries, different formatting)
-- `job_extended/`: no >=12-way joins (max join size 11)
-- `job_d/`: very large file count but join sizes still capped at 17
-- `ceb-imdb-13k/`: very large file count but join sizes still capped at 16
+## How To Run
 
-They remain available via git history (and their upstream sources) if needed.
-
-## How To Run (PostgreSQL)
-
-1. Create schema:
-   - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/imdb_pg_dataset/schema.sql`
-2. Load IMDB CSV data:
-   - `psql -d <db> -v csv_dir=/absolute/path/to/imdb_csv -f /Users/yanchengpeng/projects/oss/join_order_benchmark/imdb_pg_dataset/load.sql`
-3. Run a query file:
-   - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/imdb_pg_dataset/ceb-imdb-3k/1a/1a1.sql`
+```bash
+psql -d <db> -f imdb_pg_dataset/schema.sql
+psql -d <db> -v csv_dir=/absolute/path/to/imdb_csv -f imdb_pg_dataset/load.sql
+psql -d <db> -f imdb_pg_dataset/ceb-imdb-3k/1a/1a1.sql
+```

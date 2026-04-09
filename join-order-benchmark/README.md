@@ -1,40 +1,43 @@
-# Join Order Benchmark (JOB)
+# JOB
 
-This directory contains the original **Join Order Benchmark (JOB)** query set for PostgreSQL.
+This directory contains the PostgreSQL-formatted Join Order Benchmark (JOB) workload.
 
-## Purpose
+## Summary
 
-Use this workload to evaluate join enumeration and join-order planning decisions on real IMDB-style relational data.
+- Source: *How Good Are Query Optimizers, Really?* (PVLDB 2015)
+- Query count: 113
+- Join size: 4 to 17
+- Type: real IMDB workload
+- Main use: optimizer baseline for join-order evaluation on correlated real-world data
 
-## Source
+## Files
 
-- Paper: *How Good Are Query Optimizers, Really?* (PVLDB 2015)
-- Authors: Viktor Leis, Andrey Gubichev, Atanas Mirchev, Peter Boncz, Alfons Kemper, Thomas Neumann
-- Workload origin: IMDB snapshot from May 2013 used by JOB
+- `schema.sql`
+  IMDB schema used by JOB.
+- `fkindexes.sql`
+  Recommended supporting indexes.
+- `load.sql`
+  PostgreSQL `\copy` script for the 21 IMDB CSV files.
+- `queries/*.sql`
+  Individual JOB query files.
 
-## File Layout
+## External Data
 
-- `schema.sql`: table definitions for the IMDB relational schema used by JOB
-- `fkindexes.sql`: recommended supporting indexes on key foreign-key columns
-- `load.sql`: PostgreSQL `\copy` commands (expects external CSV files)
-- `queries/*.sql`: 113 JOB query files (`1a.sql` ... `33c.sql`)
+This workload requires the external IMDB CSV bundle.
 
-## Query Characteristics
+Recommended download source:
 
-- Query count: **113**
-- Join width: roughly **4 to 17 tables**
-- Main pattern: multi-way joins over IMDB entities (title, cast, company, keyword, info)
-- Predicates: equality joins + selective string and range filters
-- Join graph style: mostly PK/FK-heavy with realistic correlation effects
+- [https://bonsai.cedardb.com/job/imdb.tgz](https://bonsai.cedardb.com/job/imdb.tgz)
 
-## How To Run (PostgreSQL)
+Historical reference:
 
-1. Create a database.
-2. Create tables:
-   - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/join-order-benchmark/schema.sql`
-3. (Optional but recommended) create supporting indexes:
-   - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/join-order-benchmark/fkindexes.sql`
-4. Load data (CSV directory must contain all 21 IMDB CSV files):
-   - `psql -d <db> -v csv_dir=/absolute/path/to/imdb_csv -f /Users/yanchengpeng/projects/oss/join_order_benchmark/join-order-benchmark/load.sql`
-5. Run queries:
-   - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/join-order-benchmark/queries/1a.sql`
+- [https://event.cwi.nl/da/job/](https://event.cwi.nl/da/job/)
+
+## How To Run
+
+```bash
+psql -d <db> -f join-order-benchmark/schema.sql
+psql -d <db> -f join-order-benchmark/fkindexes.sql
+psql -d <db> -v csv_dir=/absolute/path/to/imdb_csv -f join-order-benchmark/load.sql
+psql -d <db> -f join-order-benchmark/queries/1a.sql
+```

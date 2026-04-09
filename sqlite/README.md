@@ -1,40 +1,38 @@
-# SQLite select5 (PostgreSQL-converted)
+# SQLite select5
 
-This directory provides a PostgreSQL-ready conversion of SQLite's classic `select5` multi-way join stress test.
+This directory contains a PostgreSQL-ready conversion of SQLite's `select5` join stress workload.
 
-## Purpose
+## Summary
 
-Use this workload to stress join-order planning on many-table equi-join graphs without requiring an external dataset.
+- Source: SQLite `select5.test`
+- Query count: 732
+- Join size: 4 to 64
+- Type: self-contained workload
+- Main use: many-table join stress without any external dataset
 
-## Source
+## Files
 
-- Original upstream file: SQLite test suite `test/select5.test`
-- Original check-in context: `599e260e37` (2008-12-03)
-- Original format: `sqllogictest`
+- `schema.sql`
+  Creates tables `t1` through `t64`.
+- `load.sql`
+  Loads deterministic toy data.
+- `queries/select5.sql`
+  Converted PostgreSQL query file.
+- `select5.test`
+  PostgreSQL entry file for the whole workload.
+- `select5.sqlite.test`
+  Original SQLite source file.
 
-## File Layout
+## How To Run
 
-- `schema.sql`: creates tables `t1` ... `t64`
-- `load.sql`: inserts deterministic toy data (10 rows per table)
-- `queries/select5.sql`: 732 SELECT statements converted to plain PostgreSQL SQL
-- `select5.test`: PostgreSQL entry file that includes schema/load/queries
-- `select5.sqlite.test`: untouched original SQLite sqllogictest source
+```bash
+psql -d <db> -f sqlite/select5.test
+```
 
-## Query Characteristics
+Or run it in stages:
 
-- Table count: **64**
-- Data size: **10 rows per table**
-- Query count: **732**
-- Join width: **4 to 64 tables**
-- Predicate style: dense equality predicates across alias-heavy table permutations
-- Main usage: parser/planner stress and join-enumeration scalability testing
-
-## How To Run (PostgreSQL)
-
-- Run everything end-to-end:
-  - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/sqlite/select5.test`
-- Or run in stages:
-  - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/sqlite/schema.sql`
-  - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/sqlite/load.sql`
-  - `psql -d <db> -f /Users/yanchengpeng/projects/oss/join_order_benchmark/sqlite/queries/select5.sql`
-
+```bash
+psql -d <db> -f sqlite/schema.sql
+psql -d <db> -f sqlite/load.sql
+psql -d <db> -f sqlite/queries/select5.sql
+```

@@ -1,0 +1,86 @@
+[scenario.smoke]
+description = "Fast self-contained validation run."
+default_variants = ["dp", "geqo", "hybrid_search"]
+reps = 1
+statement_timeout_ms = 600000
+stabilize = "none"
+variant_order_mode = "fixed"
+session_gucs = { join_collapse_limit = 100, max_parallel_workers_per_gather = 0, work_mem = "1GB", effective_cache_size = "8GB" }
+
+[[scenario.smoke.dataset]]
+name = "sqlite_select5"
+min_join = 20
+max_queries = 2
+
+[[scenario.smoke.dataset]]
+name = "gpuqo_chain_small"
+min_join = 10
+max_queries = 2
+
+[[scenario.smoke.dataset]]
+name = "gpuqo_star_small"
+min_join = 10
+max_queries = 2
+
+[scenario.main]
+description = "Default public reproduction path on full JOB and JOB-Complex."
+default_variants = ["dp", "geqo", "hybrid_search"]
+reps = 3
+statement_timeout_ms = 600000
+stabilize = "vacuum_freeze_analyze"
+variant_order_mode = "rotate"
+session_gucs = { join_collapse_limit = 100, max_parallel_workers_per_gather = 0, work_mem = "1GB", effective_cache_size = "8GB" }
+
+[[scenario.main.dataset]]
+name = "job"
+
+[[scenario.main.dataset]]
+name = "job_complex"
+
+[scenario.full]
+description = "Full public workload across all datasets in this repository."
+default_variants = ["dp", "geqo", "hybrid_search"]
+reps = 3
+statement_timeout_ms = 600000
+stabilize = "vacuum_freeze_analyze"
+variant_order_mode = "rotate"
+session_gucs = { join_collapse_limit = 100, max_parallel_workers_per_gather = 0, work_mem = "1GB", effective_cache_size = "8GB" }
+
+[[scenario.full.dataset]]
+name = "job"
+
+[[scenario.full.dataset]]
+name = "job_complex"
+
+[[scenario.full.dataset]]
+name = "imdb_ceb_3k"
+
+[[scenario.full.dataset]]
+name = "sqlite_select5"
+
+[[scenario.full.dataset]]
+name = "gpuqo_chain_small"
+
+[[scenario.full.dataset]]
+name = "gpuqo_star_small"
+
+[[scenario.full.dataset]]
+name = "gpuqo_snowflake_small"
+
+[[scenario.full.dataset]]
+name = "gpuqo_clique_small"
+variants = ["geqo", "hybrid_search"]
+
+[[scenario.full.dataset]]
+name = "gpuqo_clique_small"
+variants = ["dp"]
+max_join = 12
+
+[scenario.custom]
+description = "User-selected datasets, filters, and variants."
+default_variants = ["dp", "geqo", "hybrid_search"]
+reps = 3
+statement_timeout_ms = 600000
+stabilize = "vacuum_freeze_analyze"
+variant_order_mode = "rotate"
+session_gucs = { join_collapse_limit = 100, max_parallel_workers_per_gather = 0, work_mem = "1GB", effective_cache_size = "8GB" }

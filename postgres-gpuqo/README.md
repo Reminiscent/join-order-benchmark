@@ -1,28 +1,36 @@
-# PostgreSQL GPUQO Synthetic Workloads (Trimmed)
+# GPUQO Synthetic Workloads
 
-This directory keeps only the workload-generation pieces that are useful for join-order benchmark testing on PostgreSQL.
+This directory keeps the synthetic PostgreSQL workload subsets derived from the `postgres-gpuqo` project.
 
-## Source
+## Summary
 
-- Original project: `postgres-gpuqo`
-- Paper: *Efficient Massively Parallel Join Optimization for Large Queries* (SIGMOD 2022)
+Included subsets:
 
-## What Is Kept
+- `gpuqo_chain_small`
+  150 queries, join size 2 to 16, chain-shaped join graphs.
+- `gpuqo_clique_small`
+  150 queries, join size 2 to 16, clique-shaped join graphs.
+- `gpuqo_star_small`
+  150 queries, join size 2 to 16, star-shaped join graphs.
+- `gpuqo_snowflake_small`
+  390 queries, join size 2 to 40, snowflake-shaped join graphs.
 
-- `scripts/databases/chain-small`
-- `scripts/databases/clique-small`
-- `scripts/databases/star-small`
-- `scripts/databases/snowflake-small`
+These workloads are self-contained and are useful when you want controlled synthetic join graph structure instead of IMDB-derived real data.
 
-All PostgreSQL engine source code and non-workload assets were removed to keep this repository focused on benchmark content.
+## Files
 
-## Unified Workflow
+Each dataset directory under `scripts/databases/` provides:
 
-Each generator now emits the same output contract inside its own folder:
+- `schema.sql`
+- `load.sql`
+- `queries/*.sql`
 
-- `schema.sql`: table DDL (+ FK constraints)
-- `load.sql`: synthetic data inserts
-- `queries/*.sql`: SELECT workload files
+## How To Run
 
-See `scripts/databases/README.md` for exact commands.
+Example for `chain-small`:
 
+```bash
+psql -d <db> -f postgres-gpuqo/scripts/databases/chain-small/schema.sql
+psql -d <db> -f postgres-gpuqo/scripts/databases/chain-small/load.sql
+psql -d <db> -f postgres-gpuqo/scripts/databases/chain-small/queries/10aa.sql
+```

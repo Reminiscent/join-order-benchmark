@@ -1,4 +1,9 @@
 results/
+outputs/
 data/
 __pycache__/
 *.pyc
+*.log
+.DS_Store
+tmp/
+artifacts/

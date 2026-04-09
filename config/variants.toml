@@ -1,0 +1,36 @@
+[[variant]]
+name = "dp"
+label = "Dynamic Programming"
+session_gucs = { geqo_threshold = 100 }
+optional_session_gucs = { enable_goo_join_search = "off" }
+
+[[variant]]
+name = "geqo"
+label = "GEQO"
+session_gucs = { geqo_threshold = 2 }
+optional_session_gucs = { enable_goo_join_search = "off" }
+
+[[variant]]
+name = "goo_cost"
+label = "GOO Cost"
+session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "cost" }
+
+[[variant]]
+name = "goo_result_size"
+label = "GOO Result Size"
+session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "result_size" }
+
+[[variant]]
+name = "goo_selectivity"
+label = "GOO Selectivity"
+session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "selectivity" }
+
+[[variant]]
+name = "goo_combined"
+label = "GOO Combined"
+session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "combined" }
+
+[[variant]]
+name = "hybrid_search"
+label = "Hybrid Search"
+session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on" }
