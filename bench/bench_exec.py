@@ -16,6 +16,10 @@ class RunMetrics:
     plan_total_cost: float
 
 
+class StatementTimeoutError(RuntimeError):
+    """Raised when PostgreSQL cancels a statement due to statement_timeout."""
+
+
 def first_error_line(output: str) -> str:
     for line in output.splitlines():
         s = line.strip()
@@ -28,6 +32,10 @@ def first_error_line(output: str) -> str:
         if s:
             return s
     return ""
+
+
+def is_statement_timeout_error(message: str) -> bool:
+    return "statement timeout" in message.lower()
 
 
 def build_session_prelude(
@@ -115,7 +123,10 @@ def run_one(
     stderr = p.stderr or ""
     out = stdout + stderr
     if p.returncode != 0:
-        raise RuntimeError(first_error_line(out) or "query failed")
+        message = first_error_line(out) or "query failed"
+        if is_statement_timeout_error(message):
+            raise StatementTimeoutError(message)
+        raise RuntimeError(message)
 
     payload = stdout.strip()
     if not payload:

@@ -195,6 +195,8 @@ Current default runs collect:
 
 The warmup pass executes the full `(dataset, query, variant)` matrix once and is not recorded in `raw.csv` or `summary.csv`.
 
+Warmup queries that hit PostgreSQL `statement_timeout` are logged and skipped so the measured phase can still proceed. Measured queries that hit `statement_timeout` are recorded as `status=timeout` and do not by themselves trigger `--fail-on-error`. Non-timeout warmup failures still honor `--fail-on-error`, but the harness now writes the result artifacts before exiting non-zero.
+
 As a result, `raw.csv` records `planning_ms`, `total_ms`, `execution_ms`, and `plan_total_cost`, while `public_report.md` reports planning and execution in separate sections.
 
 `smoke` is intentionally different: it is a terminal-only sanity check and does not write any result files.
@@ -217,7 +219,7 @@ Every non-`smoke` `run` writes a self-contained result directory under `outputs/
 Result-file semantics:
 
 - `raw.csv`
-  Source-of-truth measurement log. Each row is one `(dataset, query, variant, rep)` execution attempt, including `status`, `error`, `planning_ms`, `total_ms`, `execution_ms`, and the variant rotation position used in that repetition.
+  Source-of-truth measurement log. Each row is one `(dataset, query, variant, rep)` execution attempt, including `status`, `error`, `planning_ms`, `total_ms`, `execution_ms`, and the variant rotation position used in that repetition. `status` is `ok`, `timeout`, or `error`; `timeout` rows still count as failed repetitions in `summary.csv`.
 - `summary.csv`
   One row per `(dataset, query, variant)`, derived from `raw.csv` by aggregating successful measured repetitions only. It is the compact reporting view, not the raw measurement log.
 - `run.json`

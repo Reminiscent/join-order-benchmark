@@ -16,12 +16,51 @@ from bench_common import (
 )
 from bench_environment import ensure_databases_reachable, resolved_variant_session_gucs, validate_required_gucs
 from bench_exec import (
+    StatementTimeoutError,
     rotate_variants,
     run_one,
     stabilize_db,
 )
 from bench_public_report import write_public_reports
 from bench_results import build_run_context, write_raw_csv, write_run_context, write_summary_csv
+
+
+def record_warmup_failure(
+    *,
+    warmup_failures: list[dict[str, Any]],
+    warmup_pass: int,
+    spec: ResolvedDatasetRun,
+    variant: Variant,
+    query: Any,
+    error: str,
+    category: str,
+) -> None:
+    warmup_failures.append(
+        {
+            "warmup_pass": warmup_pass,
+            "dataset": spec.dataset,
+            "db": spec.db,
+            "variant": variant.name,
+            "query_id": query.query_id,
+            "category": category,
+            "error": error,
+        }
+    )
+    label = "warmup_timeout" if category == "statement_timeout" else "warmup_error"
+    print(f"[run] {label} dataset={spec.dataset} variant={variant.name} query={query.query_id}: {error}")
+
+
+def print_failure_rows(*, label: str, rows: list[dict[str, str]]) -> None:
+    if not rows:
+        return
+    print(f"[run] {label}={len(rows)}")
+    for row in rows[:5]:
+        print(
+            f"[run] {label[:-1]} dataset={row['dataset']} variant={row['variant']} "
+            f"query={row['query_id']}: {row['error']}"
+        )
+    if len(rows) > 5:
+        print(f"[run] ... and {len(rows) - 5} more {label}")
 
 
 def run_scenario(
@@ -82,6 +121,8 @@ def run_scenario(
     query_counts: list[dict[str, Any]] = []
     stabilized_dbs: set[str] = set()
     prepared_runs: list[dict[str, Any]] = []
+    warmup_failures: list[dict[str, Any]] = []
+    termination: dict[str, Any] | None = None
 
     for spec in resolved_runs:
         if spec.db not in stabilized_dbs:
@@ -117,12 +158,18 @@ def run_scenario(
 
     if warmup_runs > 0:
         for warmup_pass in range(1, warmup_runs + 1):
+            if termination is not None:
+                break
             print(f"[run] warmup_pass={warmup_pass}/{warmup_runs}")
             for prepared in prepared_runs:
+                if termination is not None:
+                    break
                 spec = prepared["spec"]
                 entry_variants = prepared["entry_variants"]
                 query_plans = prepared["query_plans"]
                 for query_idx, (q, stmt) in enumerate(query_plans):
+                    if termination is not None:
+                        break
                     ordered_variants = (
                         rotate_variants(entry_variants, query_idx + warmup_pass - 1)
                         if variant_order_mode == "rotate"
@@ -138,89 +185,118 @@ def run_scenario(
                                 conn=conn,
                                 statement_timeout_ms=statement_timeout_ms,
                             )
+                        except StatementTimeoutError as e:
+                            record_warmup_failure(
+                                warmup_failures=warmup_failures,
+                                warmup_pass=warmup_pass,
+                                spec=spec,
+                                variant=variant,
+                                query=q,
+                                error=str(e),
+                                category="statement_timeout",
+                            )
                         except Exception as e:
-                            print(
-                                f"[run] warmup_error dataset={spec.dataset} variant={variant.name} "
-                                f"query={q.query_id}: {e}"
+                            record_warmup_failure(
+                                warmup_failures=warmup_failures,
+                                warmup_pass=warmup_pass,
+                                spec=spec,
+                                variant=variant,
+                                query=q,
+                                error=str(e),
+                                category="error",
                             )
                             if fail_on_error:
-                                raise SystemExit(1)
+                                termination = {
+                                    "phase": "warmup",
+                                    "category": "error",
+                                    "dataset": spec.dataset,
+                                    "db": spec.db,
+                                    "variant": variant.name,
+                                    "query_id": q.query_id,
+                                    "error": str(e),
+                                }
+                                print("[run] fail_on_error triggered during warmup; measured runs will be skipped")
+                                break
 
-    for prepared in prepared_runs:
-        spec = prepared["spec"]
-        entry_variants = prepared["entry_variants"]
-        query_plans = prepared["query_plans"]
+    if termination is None:
+        for prepared in prepared_runs:
+            spec = prepared["spec"]
+            entry_variants = prepared["entry_variants"]
+            query_plans = prepared["query_plans"]
 
-        for query_idx, (q, stmt) in enumerate(query_plans):
+            for query_idx, (q, stmt) in enumerate(query_plans):
 
-            for rep in range(1, reps + 1):
-                ordered_variants = (
-                    rotate_variants(entry_variants, query_idx + rep - 1)
-                    if variant_order_mode == "rotate"
-                    else list(entry_variants)
-                )
+                for rep in range(1, reps + 1):
+                    ordered_variants = (
+                        rotate_variants(entry_variants, query_idx + rep - 1)
+                        if variant_order_mode == "rotate"
+                        else list(entry_variants)
+                    )
 
-                for variant_pos, variant in enumerate(ordered_variants, start=1):
-                    key = (spec.dataset, q.query_id, variant.name)
-                    status = "ok"
-                    err = ""
-                    planning_ms = -1.0
-                    total_ms = -1.0
-                    exec_ms = -1.0
-                    plan_total_cost = -1.0
-                    execution_measurement_mode = "explain_analyze_summary_timing_off_json"
+                    for variant_pos, variant in enumerate(ordered_variants, start=1):
+                        key = (spec.dataset, q.query_id, variant.name)
+                        status = "ok"
+                        err = ""
+                        planning_ms = -1.0
+                        total_ms = -1.0
+                        exec_ms = -1.0
+                        plan_total_cost = -1.0
+                        execution_measurement_mode = "explain_analyze_summary_timing_off_json"
 
-                    try:
-                        metrics = run_one(
-                            spec.db,
-                            scenario.session_gucs,
-                            variant,
-                            stmt,
-                            conn=conn,
-                            statement_timeout_ms=statement_timeout_ms,
+                        try:
+                            metrics = run_one(
+                                spec.db,
+                                scenario.session_gucs,
+                                variant,
+                                stmt,
+                                conn=conn,
+                                statement_timeout_ms=statement_timeout_ms,
+                            )
+                            planning_ms = metrics.planning_ms
+                            total_ms = metrics.total_ms
+                            plan_total_cost = metrics.plan_total_cost
+                            exec_ms = metrics.execution_ms
+                        except StatementTimeoutError as e:
+                            status = "timeout"
+                            err = str(e)
+                        except Exception as e:
+                            status = "error"
+                            err = str(e)
+
+                        raw_rows.append(
+                            {
+                                "run_id": run_id,
+                                "scenario": scenario.name,
+                                "dataset": spec.dataset,
+                                "db": spec.db,
+                                "variant": variant.name,
+                                "query_id": q.query_id,
+                                "query_label": q.query_label,
+                                "query_path": q.query_path,
+                                "join_size": str(q.join_size),
+                                "rep": str(rep),
+                                "variant_position": str(variant_pos),
+                                "planning_ms": f"{planning_ms:.3f}" if planning_ms >= 0 else "",
+                                "total_ms": f"{total_ms:.3f}" if total_ms >= 0 else "",
+                                "execution_ms": f"{exec_ms:.3f}" if exec_ms >= 0 else "",
+                                "execution_measurement_mode": execution_measurement_mode if status == "ok" else "",
+                                "plan_total_cost": f"{plan_total_cost:.3f}" if plan_total_cost >= 0 else "",
+                                "status": status,
+                                "error": err,
+                            }
                         )
-                        planning_ms = metrics.planning_ms
-                        total_ms = metrics.total_ms
-                        plan_total_cost = metrics.plan_total_cost
-                        exec_ms = metrics.execution_ms
-                    except Exception as e:
-                        status = "error"
-                        err = str(e)
 
-                    raw_rows.append(
-                        {
-                            "run_id": run_id,
-                            "scenario": scenario.name,
-                            "dataset": spec.dataset,
-                            "db": spec.db,
-                            "variant": variant.name,
-                            "query_id": q.query_id,
-                            "query_label": q.query_label,
-                            "query_path": q.query_path,
-                            "join_size": str(q.join_size),
-                            "rep": str(rep),
-                            "variant_position": str(variant_pos),
-                            "planning_ms": f"{planning_ms:.3f}" if planning_ms >= 0 else "",
-                            "total_ms": f"{total_ms:.3f}" if total_ms >= 0 else "",
-                            "execution_ms": f"{exec_ms:.3f}" if exec_ms >= 0 else "",
-                            "execution_measurement_mode": execution_measurement_mode if status == "ok" else "",
-                            "plan_total_cost": f"{plan_total_cost:.3f}" if plan_total_cost >= 0 else "",
-                            "status": status,
-                            "error": err,
-                        }
-                    )
-
-                    summary_acc.setdefault(key, []).append(
-                        {
-                            "rep": rep,
-                            "planning_ms": planning_ms,
-                            "total_ms": total_ms,
-                            "execution_ms": exec_ms,
-                            "execution_measurement_mode": execution_measurement_mode,
-                            "plan_total_cost": plan_total_cost,
-                            "status": status,
-                        }
-                    )
+                        summary_acc.setdefault(key, []).append(
+                            {
+                                "rep": rep,
+                                "planning_ms": planning_ms,
+                                "total_ms": total_ms,
+                                "execution_ms": exec_ms,
+                                "execution_measurement_mode": execution_measurement_mode,
+                                "plan_total_cost": plan_total_cost,
+                                "status": status,
+                            }
+                        )
 
     if persist_outputs:
         assert out_dir is not None
@@ -247,6 +323,10 @@ def run_scenario(
             effective_variant_contexts=effective_variant_contexts,
             query_counts=query_counts,
         )
+        if warmup_failures:
+            run_context["warmup_failures"] = warmup_failures
+        if termination is not None:
+            run_context["termination"] = termination
 
         public_report_markdown_path = out_dir / "public_report.md"
         public_report_json_path = out_dir / "public_report.json"
@@ -261,17 +341,27 @@ def run_scenario(
 
         write_run_context(out_dir / "run.json", run_context)
 
+    warmup_timeout_rows = [row for row in warmup_failures if row["category"] == "statement_timeout"]
+    warmup_error_rows = [row for row in warmup_failures if row["category"] == "error"]
+    timeout_rows = [row for row in raw_rows if row["status"] == "timeout"]
     err_rows = [row for row in raw_rows if row["status"] == "error"]
+
+    print_failure_rows(label="warmup_timeouts", rows=warmup_timeout_rows)
+    print_failure_rows(label="warmup_errors", rows=warmup_error_rows)
+    print_failure_rows(label="timeouts", rows=timeout_rows)
+
+    if termination is not None:
+        print(
+            f"[run] terminated phase={termination['phase']} dataset={termination['dataset']} "
+            f"variant={termination['variant']} query={termination['query_id']}: {termination['error']}"
+        )
+        raise SystemExit(1)
+
     if err_rows:
-        print(f"[run] errors={len(err_rows)}")
-        for row in err_rows[:5]:
-            print(
-                f"[run] error dataset={row['dataset']} variant={row['variant']} "
-                f"query={row['query_id']}: {row['error']}"
-            )
-        if len(err_rows) > 5:
-            print(f"[run] ... and {len(err_rows) - 5} more errors")
+        print_failure_rows(label="errors", rows=err_rows)
         if fail_on_error:
             raise SystemExit(1)
+    elif warmup_failures or timeout_rows:
+        print("[run] completed with non-fatal failures")
     else:
         print("[run] completed without errors")

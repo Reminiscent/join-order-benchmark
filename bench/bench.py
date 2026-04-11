@@ -69,7 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="run this many full discarded workload passes before the measured repetitions",
     )
     ap_run.add_argument("--tag", default="", help="optional local tag for this run or the build under test")
-    ap_run.add_argument("--fail-on-error", action="store_true", help="exit non-zero if any query errors occur")
+    ap_run.add_argument(
+        "--fail-on-error",
+        action="store_true",
+        help="exit non-zero if any non-timeout query errors occur",
+    )
     add_conn_args(ap_run)
 
     ap.set_defaults(_scenarios=scenarios)
