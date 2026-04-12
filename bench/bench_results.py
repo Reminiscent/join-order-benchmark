@@ -131,6 +131,7 @@ def build_run_context(
     statement_timeout_ms: int,
     stabilize: str,
     warmup_runs: int,
+    skip_measured_after_warmup_timeout: bool,
     effective_variant_contexts: list[dict[str, Any]],
     query_counts: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -143,6 +144,7 @@ def build_run_context(
             "statement_timeout_ms": statement_timeout_ms,
             "stabilize": stabilize,
             "warmup_runs": warmup_runs,
+            "skip_measured_after_warmup_timeout": skip_measured_after_warmup_timeout,
             "warmup_scope": "full_workload_discarded_pass",
             "measurement_lane": "EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)",
             "session_gucs": [{k: v} for k, v in scenario.session_gucs],

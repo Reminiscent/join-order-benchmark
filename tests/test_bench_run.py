@@ -80,19 +80,37 @@ class RunScenarioTests(unittest.TestCase):
             join_size=4,
         )
 
-    def patch_run_environment(self, stack: ExitStack, outputs_dir: Path, run_one_side_effect: object) -> None:
+    def make_query_with_id(self, query_id: str) -> QueryMeta:
+        return QueryMeta(
+            dataset="job",
+            query_id=query_id,
+            query_path=f"job/{query_id}.sql",
+            query_label=query_id.upper(),
+            join_size=4,
+        )
+
+    def patch_run_environment(
+        self,
+        stack: ExitStack,
+        outputs_dir: Path,
+        run_one_side_effect: object,
+        *,
+        queries: list[QueryMeta] | None = None,
+    ) -> Mock:
         stack.enter_context(patch.object(bench_run, "OUTPUTS_DIR", outputs_dir))
         stack.enter_context(patch.object(bench_run, "utc_now", Mock(return_value=FIXED_NOW)))
         stack.enter_context(patch.object(bench_run, "ensure_databases_reachable", Mock()))
         stack.enter_context(patch.object(bench_run, "validate_required_gucs", Mock()))
         stack.enter_context(patch.object(bench_run, "resolved_variant_session_gucs", Mock(return_value=())))
         stack.enter_context(patch.object(bench_run, "stabilize_db", Mock()))
-        stack.enter_context(patch.object(bench_run, "select_queries", Mock(return_value=[self.make_query()])))
+        stack.enter_context(patch.object(bench_run, "select_queries", Mock(return_value=queries or [self.make_query()])))
         stack.enter_context(patch.object(bench_run, "load_sql_for_query", Mock(return_value="SELECT 1")))
         stack.enter_context(patch.object(bench_run, "build_statement", Mock(side_effect=lambda _dataset, sql: sql)))
         stack.enter_context(patch.object(bench_run, "write_summary_csv", Mock(side_effect=write_summary_csv_stub)))
         stack.enter_context(patch.object(bench_run, "write_public_reports", Mock(side_effect=write_public_reports_stub)))
-        stack.enter_context(patch.object(bench_run, "run_one", Mock(side_effect=run_one_side_effect)))
+        run_one_mock = Mock(side_effect=run_one_side_effect)
+        stack.enter_context(patch.object(bench_run, "run_one", run_one_mock))
+        return run_one_mock
 
     def only_run_dir(self, outputs_dir: Path) -> Path:
         run_dirs = [path for path in outputs_dir.iterdir() if path.is_dir()]
@@ -131,6 +149,8 @@ class RunScenarioTests(unittest.TestCase):
                 stabilize="none",
                 variant_order_mode="fixed",
                 warmup_runs=1,
+                skip_measured_after_warmup_timeout=False,
+                resume_run_id=None,
                 tag="",
                 fail_on_error=True,
             )
@@ -164,6 +184,8 @@ class RunScenarioTests(unittest.TestCase):
                 stabilize="none",
                 variant_order_mode="fixed",
                 warmup_runs=0,
+                skip_measured_after_warmup_timeout=False,
+                resume_run_id=None,
                 tag="",
                 fail_on_error=True,
             )
@@ -195,6 +217,8 @@ class RunScenarioTests(unittest.TestCase):
                     stabilize="none",
                     variant_order_mode="fixed",
                     warmup_runs=1,
+                    skip_measured_after_warmup_timeout=False,
+                    resume_run_id=None,
                     tag="",
                     fail_on_error=True,
                 )
@@ -229,6 +253,8 @@ class RunScenarioTests(unittest.TestCase):
                     stabilize="none",
                     variant_order_mode="fixed",
                     warmup_runs=0,
+                    skip_measured_after_warmup_timeout=False,
+                    resume_run_id=None,
                     tag="",
                     fail_on_error=True,
                 )
@@ -238,6 +264,199 @@ class RunScenarioTests(unittest.TestCase):
             raw_rows = self.read_raw_rows(run_dir)
             self.assertEqual(len(raw_rows), 1)
             self.assertEqual(raw_rows[0]["status"], "error")
+
+    def test_skip_measured_after_warmup_timeout_records_timeout_rows_without_rerun(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            run_one_mock = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
+            )
+
+            bench_run.run_scenario(
+                self.make_scenario(),
+                self.make_variant_registry(),
+                ("dp",),
+                self.make_resolved_runs(),
+                conn=None,
+                reps=2,
+                statement_timeout_ms=1000,
+                stabilize="none",
+                variant_order_mode="fixed",
+                warmup_runs=1,
+                skip_measured_after_warmup_timeout=True,
+                resume_run_id=None,
+                tag="",
+                fail_on_error=True,
+            )
+
+            self.assertEqual(run_one_mock.call_count, 1)
+            run_dir = self.only_run_dir(outputs_dir)
+            run_context = self.read_run_context(run_dir)
+            raw_rows = self.read_raw_rows(run_dir)
+            self.assertEqual(len(raw_rows), 2)
+            self.assertTrue(all(row["status"] == "timeout" for row in raw_rows))
+            self.assertTrue(
+                all(
+                    row["error"].startswith("skipped measured run after warmup timeout:")
+                    for row in raw_rows
+                )
+            )
+            self.assertTrue(run_context["protocol"]["skip_measured_after_warmup_timeout"])
+
+    def test_resume_run_id_continues_from_next_measured_group_boundary(self) -> None:
+        q1 = self.make_query_with_id("q1")
+        q2 = self.make_query_with_id("q2")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            with ExitStack() as stack:
+                run_one_mock = self.patch_run_environment(
+                    stack,
+                    outputs_dir,
+                    [
+                        bench_exec.RunMetrics(planning_ms=1.0, execution_ms=2.0, total_ms=3.0, plan_total_cost=4.0),
+                        KeyboardInterrupt(),
+                    ],
+                    queries=[q1, q2],
+                )
+                with self.assertRaises(KeyboardInterrupt):
+                    bench_run.run_scenario(
+                        self.make_scenario(),
+                        self.make_variant_registry(),
+                        ("dp",),
+                        self.make_resolved_runs(),
+                        conn=None,
+                        reps=1,
+                        statement_timeout_ms=1000,
+                        stabilize="none",
+                        variant_order_mode="fixed",
+                        warmup_runs=0,
+                        skip_measured_after_warmup_timeout=True,
+                        resume_run_id=None,
+                        tag="resume",
+                        fail_on_error=True,
+                    )
+                self.assertEqual(run_one_mock.call_count, 2)
+
+            run_dir = self.only_run_dir(outputs_dir)
+            self.assertEqual([row["query_id"] for row in self.read_raw_rows(run_dir)], ["q1"])
+
+            with ExitStack() as stack:
+                run_one_mock = self.patch_run_environment(
+                    stack,
+                    outputs_dir,
+                    lambda *args, **kwargs: bench_exec.RunMetrics(
+                        planning_ms=5.0,
+                        execution_ms=6.0,
+                        total_ms=11.0,
+                        plan_total_cost=7.0,
+                    ),
+                    queries=[q1, q2],
+                )
+                bench_run.run_scenario(
+                    self.make_scenario(),
+                    self.make_variant_registry(),
+                    ("dp",),
+                    self.make_resolved_runs(),
+                    conn=None,
+                    reps=1,
+                    statement_timeout_ms=1000,
+                    stabilize="none",
+                    variant_order_mode="fixed",
+                    warmup_runs=0,
+                    skip_measured_after_warmup_timeout=True,
+                    resume_run_id=run_dir.name,
+                    tag="resume",
+                    fail_on_error=True,
+                )
+                self.assertEqual(run_one_mock.call_count, 1)
+
+            raw_rows = self.read_raw_rows(run_dir)
+            self.assertEqual([row["query_id"] for row in raw_rows], ["q1", "q2"])
+            run_context = self.read_run_context(run_dir)
+            self.assertTrue(run_context["progress"]["completed"])
+
+    def test_resume_run_id_restores_warmup_timeout_skip_state(self) -> None:
+        q1 = self.make_query_with_id("q1")
+        q2 = self.make_query_with_id("q2")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            with ExitStack() as stack:
+                run_one_mock = self.patch_run_environment(
+                    stack,
+                    outputs_dir,
+                    [
+                        bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
+                        KeyboardInterrupt(),
+                    ],
+                    queries=[q1, q2],
+                )
+                with self.assertRaises(KeyboardInterrupt):
+                    bench_run.run_scenario(
+                        self.make_scenario(),
+                        self.make_variant_registry(),
+                        ("dp",),
+                        self.make_resolved_runs(),
+                        conn=None,
+                        reps=1,
+                        statement_timeout_ms=1000,
+                        stabilize="none",
+                        variant_order_mode="fixed",
+                        warmup_runs=1,
+                        skip_measured_after_warmup_timeout=True,
+                        resume_run_id=None,
+                        tag="resume-warmup",
+                        fail_on_error=True,
+                    )
+                self.assertEqual(run_one_mock.call_count, 2)
+
+            run_dir = self.only_run_dir(outputs_dir)
+            run_context = self.read_run_context(run_dir)
+            self.assertEqual(
+                run_context["progress"]["completed_warmup_groups"],
+                [{"warmup_pass": 1, "dataset": "job", "query_id": "q1"}],
+            )
+
+            with ExitStack() as stack:
+                run_one_mock = self.patch_run_environment(
+                    stack,
+                    outputs_dir,
+                    lambda *args, **kwargs: bench_exec.RunMetrics(
+                        planning_ms=9.0,
+                        execution_ms=10.0,
+                        total_ms=19.0,
+                        plan_total_cost=11.0,
+                    ),
+                    queries=[q1, q2],
+                )
+                bench_run.run_scenario(
+                    self.make_scenario(),
+                    self.make_variant_registry(),
+                    ("dp",),
+                    self.make_resolved_runs(),
+                    conn=None,
+                    reps=1,
+                    statement_timeout_ms=1000,
+                    stabilize="none",
+                    variant_order_mode="fixed",
+                    warmup_runs=1,
+                    skip_measured_after_warmup_timeout=True,
+                    resume_run_id=run_dir.name,
+                    tag="resume-warmup",
+                    fail_on_error=True,
+                )
+                self.assertEqual(run_one_mock.call_count, 2)
+
+            raw_rows = self.read_raw_rows(run_dir)
+            self.assertEqual(len(raw_rows), 2)
+            self.assertEqual(raw_rows[0]["query_id"], "q1")
+            self.assertEqual(raw_rows[0]["status"], "timeout")
+            self.assertTrue(raw_rows[0]["error"].startswith("skipped measured run after warmup timeout:"))
+            self.assertEqual(raw_rows[1]["query_id"], "q2")
 
 
 if __name__ == "__main__":

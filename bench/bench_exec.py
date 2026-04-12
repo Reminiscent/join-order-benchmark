@@ -134,7 +134,11 @@ def run_one(
     return parse_explain_json(payload)
 
 
-def stabilize_db(db: str, mode: str, conn: Optional[ConnOpts] = None) -> None:
+def stabilize_db(
+    db: str,
+    mode: str,
+    conn: Optional[ConnOpts] = None,
+) -> None:
     if mode == "vacuum_freeze_analyze":
         psql_sql(db, "VACUUM FREEZE ANALYZE;", conn=conn, check=True)
         psql_sql(db, "CHECKPOINT;", conn=conn, check=False)

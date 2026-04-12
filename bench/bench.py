@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap_run.add_argument("scenario", help="scenario name (see: list scenarios)")
     ap_run.add_argument("--datasets", default=None, help="dataset1,dataset2 (required for custom)")
     ap_run.add_argument("--variants", default=None, help="variant1,variant2 (optional override)")
+    ap_run.add_argument(
+        "--resume-run-id",
+        default=None,
+        help="resume an existing non-smoke outputs/<run_id> directory from the next unfinished group boundary",
+    )
     ap_run.add_argument("--min-join", type=int, default=None, help="custom scenario only")
     ap_run.add_argument("--max-join", type=int, default=None, help="custom scenario only")
     ap_run.add_argument("--reps", type=int, default=None, help="override scenario repetitions")
@@ -67,6 +72,22 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="run this many full discarded workload passes before the measured repetitions",
+    )
+    ap_run.add_argument(
+        "--skip-measured-after-warmup-timeout",
+        action="store_true",
+        default=True,
+        help=(
+            "after a warmup statement_timeout on an exact (dataset, query, variant), "
+            "record measured repetitions for that same combination as skipped timeouts "
+            "instead of re-running them"
+        ),
+    )
+    ap_run.add_argument(
+        "--no-skip-measured-after-warmup-timeout",
+        action="store_false",
+        dest="skip_measured_after_warmup_timeout",
+        help="re-run measured repetitions even when the exact combination already timed out during warmup",
     )
     ap_run.add_argument("--tag", default="", help="optional local tag for this run or the build under test")
     ap_run.add_argument(
@@ -139,6 +160,8 @@ def main() -> None:
             stabilize=args.stabilize if args.stabilize is not None else scenario.stabilize,
             variant_order_mode=scenario.variant_order_mode,
             warmup_runs=args.warmup_runs,
+            skip_measured_after_warmup_timeout=args.skip_measured_after_warmup_timeout,
+            resume_run_id=args.resume_run_id,
             tag=args.tag,
             fail_on_error=args.fail_on_error or scenario.name == "smoke",
         )

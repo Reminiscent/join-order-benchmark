@@ -302,14 +302,21 @@ python3 bench/bench.py run main --variants dp,geqo,my_new_algo
 
 The following overrides are available on `run`:
 
+- `--resume-run-id`
 - `--reps`
 - `--statement-timeout-ms`
 - `--stabilize`
 - `--warmup-runs`
+- `--skip-measured-after-warmup-timeout`
+- `--no-skip-measured-after-warmup-timeout`
 - `--tag`
 - `--fail-on-error`
 
 `--warmup-runs` now means discarded full-workload passes before measured repetitions. Use `--warmup-runs 0` if you want to disable the default warmup phase.
+
+`--skip-measured-after-warmup-timeout` is enabled by default. If an exact `(dataset, query, variant)` hits `statement_timeout` during warmup, the harness records the later measured repetitions for that same combination as skipped timeout rows instead of re-running them. This saves time, but it is a conservative shortcut rather than proof that the measured phase would have timed out identically. Use `--no-skip-measured-after-warmup-timeout` to restore the older behavior.
+
+`--resume-run-id` resumes an existing `outputs/<run_id>/` directory from the next unfinished safe group boundary. The harness only checkpoints after complete warmup groups `(warmup_pass, dataset, query_id)` and complete measured groups `(dataset, query_id, rep)`, so resume never continues from the middle of a query-group's variant set. This keeps per-query cross-variant comparisons aligned.
 
 `--tag` is intended for the local build or patch label under test, for example `--tag pg18_patch_v4`.
 These overrides are recorded in `run.json`.
