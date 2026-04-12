@@ -306,6 +306,54 @@ class RunScenarioTests(unittest.TestCase):
             )
             self.assertTrue(run_context["protocol"]["skip_measured_after_warmup_timeout"])
 
+    def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
+        q1 = self.make_query_with_id("q1")
+        q2 = self.make_query_with_id("q2")
+        metrics = bench_exec.RunMetrics(planning_ms=1.0, execution_ms=2.0, total_ms=3.0, plan_total_cost=4.0)
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            run_one_mock = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                [metrics] * 6,
+                queries=[q1, q2],
+            )
+            stack.enter_context(
+                patch.object(bench_run, "load_sql_for_query", Mock(side_effect=lambda q: q.query_id))
+            )
+
+            bench_run.run_scenario(
+                self.make_scenario(),
+                self.make_variant_registry(),
+                ("dp",),
+                self.make_resolved_runs(),
+                conn=None,
+                reps=2,
+                statement_timeout_ms=1000,
+                stabilize="none",
+                variant_order_mode="fixed",
+                warmup_runs=1,
+                skip_measured_after_warmup_timeout=True,
+                resume_run_id=None,
+                tag="",
+                fail_on_error=True,
+            )
+
+            self.assertEqual(run_one_mock.call_count, 6)
+            query_order = [call.args[3] for call in run_one_mock.call_args_list]
+            self.assertEqual(
+                query_order,
+                ["q1", "q1", "q1", "q2", "q2", "q2"],
+            )
+
+            raw_rows = self.read_raw_rows(self.only_run_dir(outputs_dir))
+            self.assertEqual(
+                [(row["query_id"], row["rep"]) for row in raw_rows],
+                [("q1", "1"), ("q1", "2"), ("q2", "1"), ("q2", "2")],
+            )
+
     def test_resume_run_id_continues_from_next_measured_group_boundary(self) -> None:
         q1 = self.make_query_with_id("q1")
         q2 = self.make_query_with_id("q2")

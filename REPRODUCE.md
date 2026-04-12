@@ -194,8 +194,8 @@ outputs/<run_id>/
 Current default measurement protocol:
 
 - planning and execution metrics come from `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`
-- `bench.py run` performs one full discarded workload warmup pass by default (`--warmup-runs 1`) before the measured repetitions configured by the selected scenario
-- the warmup pass executes the full `(dataset, query, variant)` matrix once and is not recorded in `raw.csv` or `summary.csv`
+- `bench.py run` performs one discarded warmup pass per query group by default (`--warmup-runs 1`) before the measured repetitions for that same query group
+- for each selected `(dataset, query)` group, the warmup pass executes that query once across the selected variants and is not recorded in `raw.csv` or `summary.csv`
 
 `run.json`
 
@@ -312,7 +312,7 @@ The following overrides are available on `run`:
 - `--tag`
 - `--fail-on-error`
 
-`--warmup-runs` now means discarded full-workload passes before measured repetitions. Use `--warmup-runs 0` if you want to disable the default warmup phase.
+`--warmup-runs` now means discarded warmup pass(es) per query group before that query group's measured repetitions. Use `--warmup-runs 0` if you want to disable the default warmup phase.
 
 `--skip-measured-after-warmup-timeout` is enabled by default. If an exact `(dataset, query, variant)` hits `statement_timeout` during warmup, the harness records the later measured repetitions for that same combination as skipped timeout rows instead of re-running them. This saves time, but it is a conservative shortcut rather than proof that the measured phase would have timed out identically. Use `--no-skip-measured-after-warmup-timeout` to restore the older behavior.
 

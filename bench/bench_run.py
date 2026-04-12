@@ -425,31 +425,126 @@ def run_scenario(
         completed=False,
     )
 
-    if warmup_runs > 0:
-        for warmup_pass in range(1, warmup_runs + 1):
+    for prepared in prepared_runs:
+        if termination is not None:
+            break
+        spec = prepared["spec"]
+        entry_variants = prepared["entry_variants"]
+        query_plans = prepared["query_plans"]
+
+        for query_idx, (q, stmt) in enumerate(query_plans):
             if termination is not None:
                 break
-            print(f"[run] warmup_pass={warmup_pass}/{warmup_runs}")
-            for prepared in prepared_runs:
+
+            for warmup_pass in range(1, warmup_runs + 1):
+                warmup_group = (warmup_pass, spec.dataset, q.query_id)
+                if warmup_group in completed_warmup_groups:
+                    continue
+                ordered_variants = (
+                    rotate_variants(entry_variants, query_idx + warmup_pass - 1)
+                    if variant_order_mode == "rotate"
+                    else list(entry_variants)
+                )
+                for variant in ordered_variants:
+                    try:
+                        run_one(
+                            spec.db,
+                            scenario.session_gucs,
+                            variant,
+                            stmt,
+                            conn=conn,
+                            statement_timeout_ms=statement_timeout_ms,
+                        )
+                    except StatementTimeoutError as e:
+                        warmup_timeout_keys.add((spec.dataset, q.query_id, variant.name))
+                        record_warmup_failure(
+                            warmup_failures=warmup_failures,
+                            warmup_pass=warmup_pass,
+                            spec=spec,
+                            variant=variant,
+                            query=q,
+                            error=str(e),
+                            category="statement_timeout",
+                        )
+                    except Exception as e:
+                        record_warmup_failure(
+                            warmup_failures=warmup_failures,
+                            warmup_pass=warmup_pass,
+                            spec=spec,
+                            variant=variant,
+                            query=q,
+                            error=str(e),
+                            category="error",
+                        )
+                        if fail_on_error:
+                            termination = {
+                                "phase": "warmup",
+                                "category": "error",
+                                "dataset": spec.dataset,
+                                "db": spec.db,
+                                "variant": variant.name,
+                                "query_id": q.query_id,
+                                "error": str(e),
+                            }
+                            print("[run] fail_on_error triggered during warmup; measured runs will be skipped")
+                            break
                 if termination is not None:
                     break
-                spec = prepared["spec"]
-                entry_variants = prepared["entry_variants"]
-                query_plans = prepared["query_plans"]
-                for query_idx, (q, stmt) in enumerate(query_plans):
-                    warmup_group = (warmup_pass, spec.dataset, q.query_id)
-                    if warmup_group in completed_warmup_groups:
-                        continue
-                    if termination is not None:
-                        break
-                    ordered_variants = (
-                        rotate_variants(entry_variants, query_idx + warmup_pass - 1)
-                        if variant_order_mode == "rotate"
-                        else list(entry_variants)
-                    )
-                    for variant in ordered_variants:
+                completed_warmup_groups.add(warmup_group)
+                flush_outputs(
+                    persist_outputs=persist_outputs,
+                    out_dir=out_dir,
+                    run_id=run_id,
+                    scenario=scenario,
+                    resolved_runs=resolved_runs,
+                    raw_rows=raw_rows,
+                    summary_acc=summary_acc,
+                    tag=tag,
+                    reps=reps,
+                    statement_timeout_ms=statement_timeout_ms,
+                    stabilize=stabilize,
+                    warmup_runs=warmup_runs,
+                    skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
+                    effective_variant_contexts=effective_variant_contexts,
+                    query_counts=query_counts,
+                    warmup_failures=warmup_failures,
+                    termination=termination,
+                    completed_warmup_groups=completed_warmup_groups,
+                    completed_measured_groups=completed_measured_groups,
+                    completed=False,
+                )
+
+            if termination is not None:
+                break
+
+            for rep in range(1, reps + 1):
+                measured_group = (spec.dataset, q.query_id, rep)
+                if measured_group in completed_measured_groups:
+                    continue
+                ordered_variants = (
+                    rotate_variants(entry_variants, query_idx + rep - 1)
+                    if variant_order_mode == "rotate"
+                    else list(entry_variants)
+                )
+
+                for variant_pos, variant in enumerate(ordered_variants, start=1):
+                    key = (spec.dataset, q.query_id, variant.name)
+                    status = "ok"
+                    err = ""
+                    planning_ms = -1.0
+                    total_ms = -1.0
+                    exec_ms = -1.0
+                    plan_total_cost = -1.0
+                    execution_measurement_mode = "explain_analyze_summary_timing_off_json"
+
+                    if skip_measured_after_warmup_timeout and key in warmup_timeout_keys:
+                        status = "timeout"
+                        err = warmup_timeout_skip_error(
+                            "ERROR: canceling statement due to statement timeout"
+                        )
+                    else:
                         try:
-                            run_one(
+                            metrics = run_one(
                                 spec.db,
                                 scenario.session_gucs,
                                 variant,
@@ -457,175 +552,74 @@ def run_scenario(
                                 conn=conn,
                                 statement_timeout_ms=statement_timeout_ms,
                             )
+                            planning_ms = metrics.planning_ms
+                            total_ms = metrics.total_ms
+                            plan_total_cost = metrics.plan_total_cost
+                            exec_ms = metrics.execution_ms
                         except StatementTimeoutError as e:
-                            warmup_timeout_keys.add((spec.dataset, q.query_id, variant.name))
-                            record_warmup_failure(
-                                warmup_failures=warmup_failures,
-                                warmup_pass=warmup_pass,
-                                spec=spec,
-                                variant=variant,
-                                query=q,
-                                error=str(e),
-                                category="statement_timeout",
-                            )
-                        except Exception as e:
-                            record_warmup_failure(
-                                warmup_failures=warmup_failures,
-                                warmup_pass=warmup_pass,
-                                spec=spec,
-                                variant=variant,
-                                query=q,
-                                error=str(e),
-                                category="error",
-                            )
-                            if fail_on_error:
-                                termination = {
-                                    "phase": "warmup",
-                                    "category": "error",
-                                    "dataset": spec.dataset,
-                                    "db": spec.db,
-                                    "variant": variant.name,
-                                    "query_id": q.query_id,
-                                    "error": str(e),
-                                }
-                                print("[run] fail_on_error triggered during warmup; measured runs will be skipped")
-                                break
-                    if termination is None:
-                        completed_warmup_groups.add(warmup_group)
-                        flush_outputs(
-                            persist_outputs=persist_outputs,
-                            out_dir=out_dir,
-                            run_id=run_id,
-                            scenario=scenario,
-                            resolved_runs=resolved_runs,
-                            raw_rows=raw_rows,
-                            summary_acc=summary_acc,
-                            tag=tag,
-                            reps=reps,
-                            statement_timeout_ms=statement_timeout_ms,
-                            stabilize=stabilize,
-                            warmup_runs=warmup_runs,
-                            skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
-                            effective_variant_contexts=effective_variant_contexts,
-                            query_counts=query_counts,
-                            warmup_failures=warmup_failures,
-                            termination=termination,
-                            completed_warmup_groups=completed_warmup_groups,
-                            completed_measured_groups=completed_measured_groups,
-                            completed=False,
-                        )
-
-    if termination is None:
-        for prepared in prepared_runs:
-            spec = prepared["spec"]
-            entry_variants = prepared["entry_variants"]
-            query_plans = prepared["query_plans"]
-
-            for query_idx, (q, stmt) in enumerate(query_plans):
-
-                for rep in range(1, reps + 1):
-                    measured_group = (spec.dataset, q.query_id, rep)
-                    if measured_group in completed_measured_groups:
-                        continue
-                    ordered_variants = (
-                        rotate_variants(entry_variants, query_idx + rep - 1)
-                        if variant_order_mode == "rotate"
-                        else list(entry_variants)
-                    )
-
-                    for variant_pos, variant in enumerate(ordered_variants, start=1):
-                        key = (spec.dataset, q.query_id, variant.name)
-                        status = "ok"
-                        err = ""
-                        planning_ms = -1.0
-                        total_ms = -1.0
-                        exec_ms = -1.0
-                        plan_total_cost = -1.0
-                        execution_measurement_mode = "explain_analyze_summary_timing_off_json"
-
-                        if skip_measured_after_warmup_timeout and key in warmup_timeout_keys:
                             status = "timeout"
-                            err = warmup_timeout_skip_error(
-                                "ERROR: canceling statement due to statement timeout"
-                            )
-                        else:
-                            try:
-                                metrics = run_one(
-                                    spec.db,
-                                    scenario.session_gucs,
-                                    variant,
-                                    stmt,
-                                    conn=conn,
-                                    statement_timeout_ms=statement_timeout_ms,
-                                )
-                                planning_ms = metrics.planning_ms
-                                total_ms = metrics.total_ms
-                                plan_total_cost = metrics.plan_total_cost
-                                exec_ms = metrics.execution_ms
-                            except StatementTimeoutError as e:
-                                status = "timeout"
-                                err = str(e)
-                            except Exception as e:
-                                status = "error"
-                                err = str(e)
+                            err = str(e)
+                        except Exception as e:
+                            status = "error"
+                            err = str(e)
 
-                        raw_rows.append(
-                            {
-                                "run_id": run_id,
-                                "scenario": scenario.name,
-                                "dataset": spec.dataset,
-                                "db": spec.db,
-                                "variant": variant.name,
-                                "query_id": q.query_id,
-                                "query_label": q.query_label,
-                                "query_path": q.query_path,
-                                "join_size": str(q.join_size),
-                                "rep": str(rep),
-                                "variant_position": str(variant_pos),
-                                "planning_ms": f"{planning_ms:.3f}" if planning_ms >= 0 else "",
-                                "total_ms": f"{total_ms:.3f}" if total_ms >= 0 else "",
-                                "execution_ms": f"{exec_ms:.3f}" if exec_ms >= 0 else "",
-                                "execution_measurement_mode": execution_measurement_mode if status == "ok" else "",
-                                "plan_total_cost": f"{plan_total_cost:.3f}" if plan_total_cost >= 0 else "",
-                                "status": status,
-                                "error": err,
-                            }
-                        )
-
-                        summary_acc.setdefault(key, []).append(
-                            {
-                                "rep": rep,
-                                "planning_ms": planning_ms,
-                                "total_ms": total_ms,
-                                "execution_ms": exec_ms,
-                                "execution_measurement_mode": execution_measurement_mode,
-                                "plan_total_cost": plan_total_cost,
-                                "status": status,
-                            }
-                        )
-                    completed_measured_groups.add(measured_group)
-                    flush_outputs(
-                        persist_outputs=persist_outputs,
-                        out_dir=out_dir,
-                        run_id=run_id,
-                        scenario=scenario,
-                        resolved_runs=resolved_runs,
-                        raw_rows=raw_rows,
-                        summary_acc=summary_acc,
-                        tag=tag,
-                        reps=reps,
-                        statement_timeout_ms=statement_timeout_ms,
-                        stabilize=stabilize,
-                        warmup_runs=warmup_runs,
-                        skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
-                        effective_variant_contexts=effective_variant_contexts,
-                        query_counts=query_counts,
-                        warmup_failures=warmup_failures,
-                        termination=termination,
-                        completed_warmup_groups=completed_warmup_groups,
-                        completed_measured_groups=completed_measured_groups,
-                        completed=False,
+                    raw_rows.append(
+                        {
+                            "run_id": run_id,
+                            "scenario": scenario.name,
+                            "dataset": spec.dataset,
+                            "db": spec.db,
+                            "variant": variant.name,
+                            "query_id": q.query_id,
+                            "query_label": q.query_label,
+                            "query_path": q.query_path,
+                            "join_size": str(q.join_size),
+                            "rep": str(rep),
+                            "variant_position": str(variant_pos),
+                            "planning_ms": f"{planning_ms:.3f}" if planning_ms >= 0 else "",
+                            "total_ms": f"{total_ms:.3f}" if total_ms >= 0 else "",
+                            "execution_ms": f"{exec_ms:.3f}" if exec_ms >= 0 else "",
+                            "execution_measurement_mode": execution_measurement_mode if status == "ok" else "",
+                            "plan_total_cost": f"{plan_total_cost:.3f}" if plan_total_cost >= 0 else "",
+                            "status": status,
+                            "error": err,
+                        }
                     )
+
+                    summary_acc.setdefault(key, []).append(
+                        {
+                            "rep": rep,
+                            "planning_ms": planning_ms,
+                            "total_ms": total_ms,
+                            "execution_ms": exec_ms,
+                            "execution_measurement_mode": execution_measurement_mode,
+                            "plan_total_cost": plan_total_cost,
+                            "status": status,
+                        }
+                    )
+                completed_measured_groups.add(measured_group)
+                flush_outputs(
+                    persist_outputs=persist_outputs,
+                    out_dir=out_dir,
+                    run_id=run_id,
+                    scenario=scenario,
+                    resolved_runs=resolved_runs,
+                    raw_rows=raw_rows,
+                    summary_acc=summary_acc,
+                    tag=tag,
+                    reps=reps,
+                    statement_timeout_ms=statement_timeout_ms,
+                    stabilize=stabilize,
+                    warmup_runs=warmup_runs,
+                    skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
+                    effective_variant_contexts=effective_variant_contexts,
+                    query_counts=query_counts,
+                    warmup_failures=warmup_failures,
+                    termination=termination,
+                    completed_warmup_groups=completed_warmup_groups,
+                    completed_measured_groups=completed_measured_groups,
+                    completed=False,
+                )
     flush_outputs(
         persist_outputs=persist_outputs,
         out_dir=out_dir,

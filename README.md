@@ -191,9 +191,9 @@ python3 tools/build_query_manifest.py --verify --summary
 Current default runs collect:
 
 - planning and execution metrics from `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`
-- one full discarded workload warmup pass by default (`--warmup-runs 1`) before the measured repetitions configured by the selected scenario
+- one discarded warmup pass per query group by default (`--warmup-runs 1`) before the measured repetitions for that same query group
 
-The warmup pass executes the full `(dataset, query, variant)` matrix once and is not recorded in `raw.csv` or `summary.csv`.
+For each selected `(dataset, query)` group, the warmup pass executes that query once across the selected variants before the measured repetitions for that same query group. Warmup executions are not recorded in `raw.csv` or `summary.csv`.
 
 Warmup queries that hit PostgreSQL `statement_timeout` are logged and skipped so the measured phase can still proceed. Measured queries that hit `statement_timeout` are recorded as `status=timeout` and do not by themselves trigger `--fail-on-error`. Non-timeout warmup failures still honor `--fail-on-error`, but the harness now writes the result artifacts before exiting non-zero.
 

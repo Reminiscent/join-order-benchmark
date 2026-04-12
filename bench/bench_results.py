@@ -145,7 +145,7 @@ def build_run_context(
             "stabilize": stabilize,
             "warmup_runs": warmup_runs,
             "skip_measured_after_warmup_timeout": skip_measured_after_warmup_timeout,
-            "warmup_scope": "full_workload_discarded_pass",
+            "warmup_scope": "query_group_discarded_pass",
             "measurement_lane": "EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)",
             "session_gucs": [{k: v} for k, v in scenario.session_gucs],
         },

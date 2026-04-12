@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--warmup-runs",
         type=int,
         default=1,
-        help="run this many full discarded workload passes before the measured repetitions",
+        help="run this many discarded warmup pass(es) per query group before its measured repetitions",
     )
     ap_run.add_argument(
         "--skip-measured-after-warmup-timeout",

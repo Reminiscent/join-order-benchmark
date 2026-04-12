@@ -602,6 +602,7 @@ def build_public_report_bundle(
         measurement_lane = "EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)"
     warmup_runs = int(run_context.get("protocol", {}).get("warmup_runs", 0) or 0)
     measured_reps = int(run_context.get("protocol", {}).get("reps", 0) or 0)
+    warmup_scope = str(run_context.get("protocol", {}).get("warmup_scope", "")).strip()
 
     notes = [
         "Execution time is the primary replacement metric; planning time is reported separately as a diagnostic.",
@@ -612,9 +613,19 @@ def build_public_report_bundle(
         "Workload-total rows sum per-query aggregated metric values on comparable queries only; coverage is reported separately.",
     ]
     if warmup_runs or measured_reps:
+        if warmup_scope == "query_group_discarded_pass":
+            warmup_note = (
+                f"Each query group used {warmup_runs} discarded warmup pass(es) "
+                f"before {measured_reps} measured repetition(s)."
+            )
+        else:
+            warmup_note = (
+                f"Each run used {warmup_runs} discarded full-workload warmup pass(es) "
+                f"before {measured_reps} measured repetition(s)."
+            )
         notes.insert(
             2,
-            f"Each run used {warmup_runs} discarded full-workload warmup pass(es) before {measured_reps} measured repetition(s).",
+            warmup_note,
         )
 
     return {
