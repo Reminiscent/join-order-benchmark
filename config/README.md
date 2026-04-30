@@ -13,13 +13,17 @@ Supported fields per scenario:
   Human-readable scenario description shown by `bench.py list scenarios`.
 - `default_variants`
   Variant names selected when `bench.py run` does not receive `--variants`.
-  The names must exist in the active variants file.
+  The built-in scenarios keep this to the portable `dp` and `geqo` baselines;
+  pass `--variants` for patch-specific algorithms.  The names must exist in the
+  active variants file.
 - `reps`
   Number of measured repetitions per query and variant.
 - `statement_timeout_ms`
   Per-statement timeout applied by the runner.
 - `stabilize`
-  Database stabilization mode before the run.
+  Database stabilization mode before the run.  `vacuum_freeze_analyze` means
+  the runner executes `VACUUM (FREEZE, ANALYZE)` on prepared benchmark tables
+  before measurement so visibility-map and statistics state are refreshed.
 - `variant_order_mode`
   Variant execution order.  Use `rotate` for benchmark runs so each variant
   appears in different positions across query groups.
@@ -27,7 +31,10 @@ Supported fields per scenario:
   Scenario-level session settings applied before variant-level settings.
 - `[[scenario.<name>.dataset]]`
   Dataset entries selected by the scenario.  Entries may include `min_join`,
-  `max_join`, `max_queries`, or a per-entry `variants` subset.
+  `max_join`, `max_queries`, a per-entry `variants` subset, or
+  `exclude_variants`.  Use `exclude_variants` for "all selected variants except
+  these"; for example, `gpuqo_clique_small` runs non-`dp` variants fully while
+  `dp` is limited to `join_size <= 12`.
 
 ## Variants
 

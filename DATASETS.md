@@ -92,8 +92,8 @@ not as realistic execution-time claims.
 `imdb_ceb_3k` has much higher query volume than the other workloads and can
 dominate campaign time.
 
-In `extended` and `full`, `gpuqo_clique_small` keeps `geqo` and `hybrid_search`
-on the full 150-query set while limiting `dp` to `join_size <= 12`.
+In `extended` and `full`, `gpuqo_clique_small` keeps non-`dp` variants on the
+full 150-query set while limiting `dp` to `join_size <= 12`.
 
 ## Prepare Commands
 

@@ -30,7 +30,8 @@ Optional connection flags supported by every command:
 ## 2. Variants
 
 The default variant file is [examples/variants.toml](examples/variants.toml).
-It is an example set used by this repository's experiments.
+It contains portable baselines plus other example algorithms used by this
+repository's experiments.
 
 Inspect the active variants:
 
@@ -42,11 +43,11 @@ Use a custom variant file when testing a different algorithm or parameter set:
 
 ```bash
 python3 bench/bench.py list variants --variants-file path/to/variants.toml
-python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,my_algo
+python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
 ```
 
-If a stock PostgreSQL build does not expose the custom GUCs used by the example
-file, run with portable variants:
+The built-in scenario defaults are the portable `dp` and `geqo` baselines.  Use
+an explicit `--variants` list for any patch-specific algorithm.
 
 ```bash
 python3 bench/bench.py run main --variants dp,geqo
@@ -96,16 +97,16 @@ Prepare:
 python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 ```
 
-Run:
+Run with portable baselines:
 
 ```bash
-python3 bench/bench.py run main
+python3 bench/bench.py run main --variants dp,geqo
 ```
 
 Run with an explicit variant set:
 
 ```bash
-python3 bench/bench.py run main --variants dp,geqo,hybrid_search
+python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
 ```
 
 ## 6. Extended And Full Runs
@@ -133,8 +134,8 @@ python3 bench/bench.py prepare full --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run full
 ```
 
-In `extended` and `full`, `gpuqo_clique_small` keeps `geqo` and `hybrid_search`
-on the full dataset while limiting `dp` to `join_size <= 12`.
+In `extended` and `full`, `gpuqo_clique_small` keeps non-`dp` variants on the
+full dataset while limiting `dp` to `join_size <= 12`.
 
 ## 7. Output Layout
 

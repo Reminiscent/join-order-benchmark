@@ -102,6 +102,16 @@ def load_scenarios() -> dict[str, Scenario]:
                 if not isinstance(raw_variants, list):
                     die(f"scenario '{name}' dataset '{dataset}' has invalid variants list")
                 variants = tuple(str(v) for v in raw_variants if str(v).strip())
+            raw_exclude_variants = item.get("exclude_variants")
+            exclude_variants: Optional[tuple[str, ...]]
+            if raw_exclude_variants is None:
+                exclude_variants = None
+            else:
+                if variants is not None:
+                    die(f"scenario '{name}' dataset '{dataset}' cannot define both variants and exclude_variants")
+                if not isinstance(raw_exclude_variants, list):
+                    die(f"scenario '{name}' dataset '{dataset}' has invalid exclude_variants list")
+                exclude_variants = tuple(str(v) for v in raw_exclude_variants if str(v).strip())
             datasets.append(
                 DatasetSpec(
                     dataset=dataset,
@@ -109,6 +119,7 @@ def load_scenarios() -> dict[str, Scenario]:
                     max_join=int(item["max_join"]) if "max_join" in item else None,
                     max_queries=int(item["max_queries"]) if "max_queries" in item else None,
                     variants=variants,
+                    exclude_variants=exclude_variants,
                 )
             )
 
@@ -151,6 +162,9 @@ def resolve_dataset_runs(
             entry_variants = variant_names
         else:
             entry_variants = tuple(name for name in variant_names if name in spec.variants)
+        if spec.exclude_variants is not None:
+            excluded = set(spec.exclude_variants)
+            entry_variants = tuple(name for name in entry_variants if name not in excluded)
         if not entry_variants:
             continue
         resolved.append(

@@ -42,6 +42,7 @@ class DatasetSpec:
     max_join: Optional[int] = None
     max_queries: Optional[int] = None
     variants: Optional[tuple[str, ...]] = None
+    exclude_variants: Optional[tuple[str, ...]] = None
 
 
 @dataclass(frozen=True)

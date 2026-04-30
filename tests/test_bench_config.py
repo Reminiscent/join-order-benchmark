@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_common import DatasetSpec, Scenario
-from bench_config import load_variants, resolve_prepare_dataset_runs
+from bench_config import load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
 
 
 class BenchConfigTests(unittest.TestCase):
@@ -18,14 +18,14 @@ class BenchConfigTests(unittest.TestCase):
         return Scenario(
             name="full",
             description="test scenario",
-            default_variants=("dp", "geqo", "hybrid_search"),
+            default_variants=("dp", "geqo"),
             reps=1,
             statement_timeout_ms=1000,
             stabilize="none",
             variant_order_mode="fixed",
             session_gucs=(),
             datasets=(
-                DatasetSpec(dataset="gpuqo_clique_small", variants=("geqo", "hybrid_search")),
+                DatasetSpec(dataset="gpuqo_clique_small", exclude_variants=("dp",)),
                 DatasetSpec(dataset="gpuqo_clique_small", max_join=12, variants=("dp",)),
                 DatasetSpec(dataset="sqlite_select5"),
             ),
@@ -65,6 +65,21 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
             ],
         )
         self.assertTrue(all(entry.variants == () for entry in resolved))
+
+    def test_dataset_resolution_can_select_non_dp_variants(self) -> None:
+        resolved = resolve_dataset_runs(
+            self.make_scenario(),
+            ("dp", "geqo", "my_algo"),
+        )
+
+        self.assertEqual(
+            [(entry.dataset, entry.max_join, entry.variants) for entry in resolved],
+            [
+                ("gpuqo_clique_small", None, ("geqo", "my_algo")),
+                ("gpuqo_clique_small", 12, ("dp",)),
+                ("sqlite_select5", None, ("dp", "geqo", "my_algo")),
+            ],
+        )
 
 
 if __name__ == "__main__":

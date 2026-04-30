@@ -1,6 +1,6 @@
 [scenario.main]
 description = "Primary algorithm validation path on full JOB and JOB-Complex."
-default_variants = ["dp", "geqo", "hybrid_search"]
+default_variants = ["dp", "geqo"]
 reps = 3
 statement_timeout_ms = 600000
 stabilize = "vacuum_freeze_analyze"
@@ -15,7 +15,7 @@ name = "job_complex"
 
 [scenario.extended]
 description = "Broader validation with self-contained planning-stress workloads, excluding CEB IMDB 3k."
-default_variants = ["dp", "geqo", "hybrid_search"]
+default_variants = ["dp", "geqo"]
 reps = 3
 statement_timeout_ms = 600000
 stabilize = "vacuum_freeze_analyze"
@@ -42,7 +42,7 @@ name = "gpuqo_snowflake_small"
 
 [[scenario.extended.dataset]]
 name = "gpuqo_clique_small"
-variants = ["geqo", "hybrid_search"]
+exclude_variants = ["dp"]
 
 [[scenario.extended.dataset]]
 name = "gpuqo_clique_small"
@@ -51,7 +51,7 @@ max_join = 12
 
 [scenario.full]
 description = "Complete built-in workload, including the heavy CEB IMDB 3k suite."
-default_variants = ["dp", "geqo", "hybrid_search"]
+default_variants = ["dp", "geqo"]
 reps = 3
 statement_timeout_ms = 600000
 stabilize = "vacuum_freeze_analyze"
@@ -78,7 +78,7 @@ name = "gpuqo_snowflake_small"
 
 [[scenario.full.dataset]]
 name = "gpuqo_clique_small"
-variants = ["geqo", "hybrid_search"]
+exclude_variants = ["dp"]
 
 [[scenario.full.dataset]]
 name = "gpuqo_clique_small"
