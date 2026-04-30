@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from bench_catalog import PREPARE_MARKERS, dataset_prepare_scripts
-from bench_config import load_variants, resolve_dataset_runs, resolve_variant_names
+from bench_config import resolve_prepare_dataset_runs
 from bench_common import ConnOpts, Scenario, die, psql_cmd, psql_file, psql_sql, run_cmd, sql_identifier, sql_literal
 
 
@@ -83,21 +83,11 @@ def prepare_dataset(
 def prepare_scenario(
     scenario: Scenario,
     *,
-    custom_datasets_csv: Optional[str],
     csv_dir: Optional[str],
     conn: Optional[ConnOpts],
     force_recreate: bool,
 ) -> None:
-    variants = load_variants()
-    variant_names = resolve_variant_names(scenario, variants, None)
-    resolved = resolve_dataset_runs(
-        scenario,
-        variant_names,
-        custom_datasets_csv=custom_datasets_csv,
-        custom_min_join=None,
-        custom_max_join=None,
-        custom_max_queries=None,
-    )
+    resolved = resolve_prepare_dataset_runs(scenario)
 
     prepared: set[str] = set()
     for entry in resolved:

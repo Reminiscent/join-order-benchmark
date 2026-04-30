@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = REPO_ROOT / "meta" / "query_manifest.csv"
-VARIANTS_CONFIG_PATH = REPO_ROOT / "config" / "variants.toml"
+DEFAULT_VARIANTS_CONFIG_PATH = REPO_ROOT / "examples" / "variants.toml"
 SCENARIOS_CONFIG_PATH = REPO_ROOT / "config" / "scenarios.toml"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 try:
@@ -10,7 +11,7 @@ except ModuleNotFoundError:  # pragma: no cover
 from bench_catalog import available_datasets, dataset_db_name
 from bench_common import (
     SCENARIOS_CONFIG_PATH,
-    VARIANTS_CONFIG_PATH,
+    DEFAULT_VARIANTS_CONFIG_PATH,
     DatasetSpec,
     ResolvedDatasetRun,
     Scenario,
@@ -20,30 +21,31 @@ from bench_common import (
 )
 
 
-def load_variants() -> dict[str, Variant]:
-    if not VARIANTS_CONFIG_PATH.is_file():
-        die(f"missing variants config: {VARIANTS_CONFIG_PATH}")
-    data = tomllib.loads(VARIANTS_CONFIG_PATH.read_text())
+def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
+    variants_path = Path(path) if path is not None else DEFAULT_VARIANTS_CONFIG_PATH
+    if not variants_path.is_file():
+        die(f"missing variants config: {variants_path}")
+    data = tomllib.loads(variants_path.read_text())
     raw_variants = data.get("variant")
     if not isinstance(raw_variants, list) or not raw_variants:
-        die(f"{VARIANTS_CONFIG_PATH} must define at least one [[variant]] entry")
+        die(f"{variants_path} must define at least one [[variant]] entry")
 
     out: dict[str, Variant] = {}
     for entry in raw_variants:
         if not isinstance(entry, dict):
-            die(f"bad [[variant]] entry in {VARIANTS_CONFIG_PATH}")
+            die(f"bad [[variant]] entry in {variants_path}")
         name = str(entry.get("name", "")).strip()
         if not name:
-            die(f"variant in {VARIANTS_CONFIG_PATH} is missing name")
+            die(f"variant in {variants_path} is missing name")
         if name in out:
-            die(f"duplicate variant name '{name}' in {VARIANTS_CONFIG_PATH}")
+            die(f"duplicate variant name '{name}' in {variants_path}")
         label = str(entry.get("label", name)).strip() or name
         raw_gucs = entry.get("session_gucs", {})
         if not isinstance(raw_gucs, dict):
-            die(f"variant '{name}' has invalid session_gucs in {VARIANTS_CONFIG_PATH}")
+            die(f"variant '{name}' has invalid session_gucs in {variants_path}")
         raw_optional_gucs = entry.get("optional_session_gucs", {})
         if not isinstance(raw_optional_gucs, dict):
-            die(f"variant '{name}' has invalid optional_session_gucs in {VARIANTS_CONFIG_PATH}")
+            die(f"variant '{name}' has invalid optional_session_gucs in {variants_path}")
         out[name] = Variant(
             name=name,
             label=label,
@@ -141,38 +143,8 @@ def resolve_variant_names(
 def resolve_dataset_runs(
     scenario: Scenario,
     variant_names: tuple[str, ...],
-    *,
-    custom_datasets_csv: Optional[str],
-    custom_min_join: Optional[int],
-    custom_max_join: Optional[int],
-    custom_max_queries: Optional[int],
 ) -> list[ResolvedDatasetRun]:
-    known_datasets = set(available_datasets())
     resolved: list[ResolvedDatasetRun] = []
-
-    if scenario.name == "custom":
-        datasets = parse_csv_list(custom_datasets_csv)
-        if not datasets:
-            die("custom scenario requires --datasets dataset1,dataset2")
-        for dataset in datasets:
-            if dataset not in known_datasets:
-                die(f"unknown dataset '{dataset}' (see: python3 bench/bench.py list datasets)")
-            resolved.append(
-                ResolvedDatasetRun(
-                    dataset=dataset,
-                    db=dataset_db_name(dataset),
-                    min_join=custom_min_join,
-                    max_join=custom_max_join,
-                    max_queries=custom_max_queries,
-                    variants=variant_names,
-                )
-            )
-        return resolved
-
-    if custom_datasets_csv is not None:
-        die("--datasets is only supported with the custom scenario")
-    if custom_min_join is not None or custom_max_join is not None or custom_max_queries is not None:
-        die("--min-join/--max-join are only supported with the custom scenario")
 
     for spec in scenario.datasets:
         if spec.variants is None:
@@ -197,11 +169,33 @@ def resolve_dataset_runs(
     return resolved
 
 
+def resolve_prepare_dataset_runs(
+    scenario: Scenario,
+) -> list[ResolvedDatasetRun]:
+    known_datasets = set(available_datasets())
+    datasets = list(dict.fromkeys(spec.dataset for spec in scenario.datasets))
+
+    resolved: list[ResolvedDatasetRun] = []
+    for dataset in datasets:
+        if dataset not in known_datasets:
+            die(f"unknown dataset '{dataset}' (see: python3 bench/bench.py list datasets)")
+        resolved.append(
+            ResolvedDatasetRun(
+                dataset=dataset,
+                db=dataset_db_name(dataset),
+                min_join=None,
+                max_join=None,
+                max_queries=None,
+                variants=(),
+            )
+        )
+    return resolved
+
+
 def print_scenarios(scenarios: dict[str, Scenario]) -> None:
-    for name in sorted(scenarios):
-        scenario = scenarios[name]
+    for name, scenario in scenarios.items():
         dataset_names = list(dict.fromkeys(spec.dataset for spec in scenario.datasets))
-        datasets = ", ".join(dataset_names) if dataset_names else "(custom)"
+        datasets = ", ".join(dataset_names)
         print(f"{name}\t{scenario.description}\tvariants={','.join(scenario.default_variants)}\tdatasets={datasets}")
 
 

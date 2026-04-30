@@ -184,8 +184,7 @@ def validate_resume_context(
 
 def flush_outputs(
     *,
-    persist_outputs: bool,
-    out_dir: Optional[Path],
+    out_dir: Path,
     run_id: str,
     scenario: Scenario,
     resolved_runs: list[ResolvedDatasetRun],
@@ -205,10 +204,6 @@ def flush_outputs(
     completed_measured_groups: set[tuple[str, str, int]],
     completed: bool,
 ) -> None:
-    if not persist_outputs:
-        return
-
-    assert out_dir is not None
     raw_path = out_dir / "raw.csv"
     write_raw_csv(raw_path, raw_rows)
 
@@ -280,26 +275,18 @@ def run_scenario(
     if variant_order_mode not in {"fixed", "rotate"}:
         die(f"scenario defines unsupported variant order mode: {variant_order_mode}")
 
-    persist_outputs = scenario.name != "smoke"
-    if resume_run_id and not persist_outputs:
-        die("--resume-run-id is only supported for non-smoke runs")
-
     run_id = (
         resume_run_id
         if resume_run_id
         else f"{utc_now().strftime('%Y%m%d_%H%M%S_%f')}_{safe_artifact_name(scenario.name)}"
-        if persist_outputs
-        else ""
     )
-    out_dir: Path | None = None
-    if persist_outputs:
-        OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-        out_dir = OUTPUTS_DIR / run_id
-        if resume_run_id:
-            if not out_dir.is_dir():
-                die(f"resume run_id not found: {out_dir}")
-        else:
-            out_dir.mkdir(parents=True, exist_ok=True)
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = OUTPUTS_DIR / run_id
+    if resume_run_id:
+        if not out_dir.is_dir():
+            die(f"resume run_id not found: {out_dir}")
+    else:
+        out_dir.mkdir(parents=True, exist_ok=True)
 
     dbs = sorted({entry.db for entry in resolved_runs})
     ensure_databases_reachable(dbs, conn)
@@ -316,11 +303,7 @@ def run_scenario(
     print(f"[run] scenario={scenario.name}")
     print(f"[run] variants={','.join(variant_names)}")
     print(f"[run] warmup_passes={warmup_runs} measured_reps={reps}")
-    if persist_outputs:
-        assert out_dir is not None
-        print(f"[run] outputs={out_dir}")
-    else:
-        print("[run] smoke mode: no outputs will be written")
+    print(f"[run] outputs={out_dir}")
 
     raw_rows: list[dict[str, str]] = []
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = {}
@@ -403,7 +386,6 @@ def run_scenario(
         )
 
     flush_outputs(
-        persist_outputs=persist_outputs,
         out_dir=out_dir,
         run_id=run_id,
         scenario=scenario,
@@ -492,7 +474,6 @@ def run_scenario(
                     break
                 completed_warmup_groups.add(warmup_group)
                 flush_outputs(
-                    persist_outputs=persist_outputs,
                     out_dir=out_dir,
                     run_id=run_id,
                     scenario=scenario,
@@ -599,7 +580,6 @@ def run_scenario(
                     )
                 completed_measured_groups.add(measured_group)
                 flush_outputs(
-                    persist_outputs=persist_outputs,
                     out_dir=out_dir,
                     run_id=run_id,
                     scenario=scenario,
@@ -621,7 +601,6 @@ def run_scenario(
                     completed=False,
                 )
     flush_outputs(
-        persist_outputs=persist_outputs,
         out_dir=out_dir,
         run_id=run_id,
         scenario=scenario,

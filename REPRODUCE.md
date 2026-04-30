@@ -1,6 +1,7 @@
 # Reproduce
 
-This document describes the current public reproduction flow for this repository.
+This document describes the public reproduction flow for this benchmark
+repository.
 
 ## 1. Requirements
 
@@ -9,9 +10,10 @@ You need:
 - a reachable PostgreSQL instance
 - `psql` in `PATH`
 - Python 3.11 or newer
-- the external IMDB CSV bundle only when preparing scenarios that include IMDB-backed datasets
+- the external IMDB CSV bundle when preparing IMDB-backed datasets
 
-The documented reproduction path is Python 3.11+ only. No extra Python package is required for TOML parsing on supported Python versions.
+The documented reproduction path is Python 3.11+ only.  No extra Python package
+is required for TOML parsing on supported Python versions.
 
 If you use a custom PostgreSQL build, expose its binaries first:
 
@@ -27,96 +29,66 @@ Optional connection flags supported by every command:
 
 ## 2. Variants
 
-Variants are defined in `config/variants.toml`.
+The default variant file is [examples/variants.toml](examples/variants.toml).
+It is an example set used by this repository's experiments.
 
-To inspect them:
+Inspect the active variants:
 
 ```bash
 python3 bench/bench.py list variants
 ```
 
-To run a scenario with an explicit variant set:
+Use a custom variant file when testing a different algorithm or parameter set:
 
 ```bash
-python3 bench/bench.py run smoke --variants dp,geqo
+python3 bench/bench.py list variants --variants-file path/to/variants.toml
+python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,my_algo
 ```
 
-If the implementation under test changes variant parameters, update `config/variants.toml`.
+If a stock PostgreSQL build does not expose the custom GUCs used by the example
+file, run with portable variants:
 
-## 3. External IMDB CSV Data
+```bash
+python3 bench/bench.py run main --variants dp,geqo
+```
 
-The following datasets require the external IMDB CSV bundle:
+Variant fields are documented in [config/README.md](config/README.md).
 
-- `job`
-- `job_complex`
-- `imdb_ceb_3k`
+## 3. Data Setup
 
-Recommended download source:
+Dataset details and IMDB CSV setup are documented in [DATASETS.md](DATASETS.md).
 
-- CedarDB mirror: [https://bonsai.cedardb.com/job/imdb.tgz](https://bonsai.cedardb.com/job/imdb.tgz)
-
-Historical reference:
-
-- CWI JOB page: [https://event.cwi.nl/da/job/](https://event.cwi.nl/da/job/)
-
-Example setup:
+Typical IMDB CSV setup:
 
 ```bash
 mkdir -p data/imdb_csv
 tar -xzf imdb.tgz -C data/imdb_csv
 ```
 
-The extracted directory should contain the 21 CSV files used by the IMDB schema load scripts.
-
 ## 4. Discover What Exists
 
-List the built-in scenarios:
+List scenarios:
 
 ```bash
 python3 bench/bench.py list scenarios
 ```
 
-List the built-in variants:
-
-```bash
-python3 bench/bench.py list variants
-```
-
-List the available datasets:
+List datasets:
 
 ```bash
 python3 bench/bench.py list datasets
 ```
 
-## 5. Smoke Run
-
-`smoke` is the fastest end-to-end path and does not require IMDB CSV files.
-It intentionally samples only a few wider queries instead of running whole datasets.
-It is a terminal-only sanity check and does not create an `outputs/<run_id>/` result directory.
-
-If your PostgreSQL build exposes the custom benchmark GUCs, you can run the default smoke scenario:
+List variants:
 
 ```bash
-python3 bench/bench.py prepare smoke
-python3 bench/bench.py run smoke
+python3 bench/bench.py list variants
 ```
 
-If you are using a stock PostgreSQL build, run smoke with portable variants:
+## 5. Main Run
 
-```bash
-python3 bench/bench.py prepare smoke
-python3 bench/bench.py run smoke --variants dp,geqo
-```
-
-## 6. Main Public Reproduction
-
-`main` is the default public reproduction path and runs the full workloads for:
-
-- `job`
-- `job_complex`
-
-These workloads share one IMDB-backed benchmark database.
-There is no built-in join-size filter in `main`; it covers all 113 `job` queries and all 30 `job_complex` queries.
+`main` is the primary public validation path for a new join-order algorithm.  It
+runs the full `job` and `job_complex` workloads.
 
 Prepare:
 
@@ -124,7 +96,7 @@ Prepare:
 python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 ```
 
-Run with the scenario defaults:
+Run:
 
 ```bash
 python3 bench/bench.py run main
@@ -136,49 +108,37 @@ Run with an explicit variant set:
 python3 bench/bench.py run main --variants dp,geqo,hybrid_search
 ```
 
-## 7. Full Run
+## 6. Extended And Full Runs
 
-`full` runs the full public workload in this repository, including the heavier `imdb_ceb_3k` suite.
-The one intentional exception is `gpuqo_clique_small`, where `dp` is capped at `join_size <= 12` while `geqo` and `hybrid_search` still run the full dataset.
+`extended` is the broad validation layer after `main`.  It adds self-contained
+stress workloads converted from SQLite and GPUQO sources.  These workloads have
+small local data and many wide joins, so they are most useful for planning time
+and join-search stress rather than realistic execution-time claims.
 
-Prepare:
+Prepare and run:
+
+```bash
+python3 bench/bench.py prepare extended --csv-dir "$(pwd)/data/imdb_csv"
+python3 bench/bench.py run extended
+```
+
+`full` is the complete built-in campaign.  It runs `extended` plus
+`imdb_ceb_3k`, which has much higher query volume and can dominate campaign
+time.
+
+Prepare and run:
 
 ```bash
 python3 bench/bench.py prepare full --csv-dir "$(pwd)/data/imdb_csv"
-```
-
-Run:
-
-```bash
 python3 bench/bench.py run full
 ```
 
-## 8. Custom Run
+In `extended` and `full`, `gpuqo_clique_small` keeps `geqo` and `hybrid_search`
+on the full dataset while limiting `dp` to `join_size <= 12`.
 
-Use `custom` when you want to choose the datasets, join filters, or variants yourself.
+## 7. Output Layout
 
-Prepare a custom dataset set:
-
-```bash
-python3 bench/bench.py prepare custom --datasets job,job_complex --csv-dir "$(pwd)/data/imdb_csv"
-```
-
-Run a custom experiment:
-
-```bash
-python3 bench/bench.py run custom \
-  --datasets job,job_complex \
-  --min-join 12 \
-  --variants dp,geqo,hybrid_search
-```
-
-Additional custom filters:
-
-- `--max-join`
-
-## 9. Output Layout
-
-Every non-`smoke` run creates:
+Every `run` creates:
 
 ```text
 outputs/<run_id>/
@@ -189,77 +149,69 @@ outputs/<run_id>/
   public_report.json
 ```
 
-## 10. What Each Output File Means
-
-Current default measurement protocol:
-
-- planning and execution metrics come from `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`
-- `bench.py run` performs one discarded warmup pass per query group by default (`--warmup-runs 1`) before the measured repetitions for that same query group
-- for each selected `(dataset, query)` group, the warmup pass executes that query once across the selected variants and is not recorded in `raw.csv` or `summary.csv`
-
 `run.json`
 
-- minimal run context needed to explain the benchmark protocol and re-render the public report
-- includes:
-  - `run_id`
-  - `scenario`
-  - `protocol` with `reps`, `statement_timeout_ms`, `stabilize`, `warmup_runs`, `warmup_scope`, `measurement_lane`, and scenario-level `session_gucs`
-  - resolved `variants` with only the variant-level GUCs that actually applied on this PostgreSQL build
-  - resolved `datasets` with dataset filters and selected variants
-  - optional local `tag` only when explicitly provided
-- it intentionally does not snapshot host metadata, PostgreSQL version, cluster-level settings, or git state
+- minimal run context needed to explain the benchmark protocol and re-render the
+  public report
+- includes scenario name, protocol settings, resolved variants, resolved
+  datasets, optional `tag`, warmup failures, and progress state
+- intentionally does not snapshot host metadata, PostgreSQL version,
+  cluster-level settings, or git state
 
 `raw.csv`
 
 - source-of-truth measurement log
 - one row per `(dataset, query, variant, rep)`
-- includes status, error details, and the directly recorded timing fields for that repetition
-- use this when you need to inspect individual repetitions, failures, or run-order effects
+- includes status, error details, phase timings, planner cost, and variant
+  rotation position
 
 `summary.csv`
 
 - aggregated reporting view derived from `raw.csv`
 - one row per `(dataset, query, variant)`
-- aggregates successful measured reps only and carries `ok_reps` / `err_reps`
-- use this for per-query comparison tables, workload totals, and public reports
+- aggregates successful measured repetitions only and carries `ok_reps` /
+  `err_reps`
 
 `public_report.md`
 
-- auto-generated after every normal `run`
-- human-readable public report with separate execution and planning sections
-- includes coverage, ratio summaries, tail counts, workload totals, and worst-query regressions
+- auto-generated after every `run`
+- public markdown report with separate execution and planning sections
 
 `public_report.json`
 
 - machine-readable form of the same public report
-- intended for downstream tooling or custom post-processing
+
+## 8. Measurement Semantics
+
+Current default measurement protocol:
+
+- planning and execution metrics come from
+  `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`
+- `bench.py run` performs one discarded warmup pass per query group by default
+  before measured repetitions for that same query group
+- warmup executions are not recorded in `raw.csv` or `summary.csv`
+- measured `statement_timeout` rows are recorded as `status=timeout`
+- non-timeout errors are recorded as `status=error`
 
 Recommended result columns:
 
 - `execution_ms_median`
-  Preferred primary column for execution-focused comparisons such as `algo / DP` public ratio tables. It is the per-query median `Execution Time` from the measured `EXPLAIN ANALYZE` lane.
+  Primary execution comparison column for public ratio tables.
 - `total_ms_median`
-  Typical directly observed combined planning-plus-execution time from a single successful measured repetition.
+  Typical directly observed planning-plus-execution time for a successful
+  measured repetition.
 - `planning_ms_median`
-  Median planning overhead across successful measured repetitions. This should be reported separately from execution.
+  Planner overhead, reported separately from execution.
 - `plan_total_cost_median`
-  Median planner cost across successful measured repetitions. Use it as a planner-side diagnostic only.
+  Planner-side diagnostic signal, not a runtime substitute.
 
-Default public-report behavior:
-
-- every non-`smoke` `bench.py run` automatically writes `public_report.md` and `public_report.json` into `outputs/<run_id>/`.
-- The execution section is the primary replacement view and is based on per-query medians rather than minima.
-- The planning section is a separate diagnostic view.
-- The report states that these metrics are PostgreSQL backend phase times from the measured `EXPLAIN ANALYZE` lane, not client end-to-end latencies.
-- Workload totals sum per-query aggregated metric values on comparable queries only, and `p99` is omitted for small suites where it would collapse to the max or near-max query.
-
-To re-render the default public report for an existing run:
+To re-render the default public report:
 
 ```bash
 python3 tools/render_public_reports.py outputs/<run_id>
 ```
 
-## 11. Session-Level vs Cluster-Level Settings
+## 9. Session-Level vs Cluster-Level Settings
 
 The harness applies and records session-level benchmark settings, such as:
 
@@ -269,39 +221,19 @@ The harness applies and records session-level benchmark settings, such as:
 - `work_mem`
 - `effective_cache_size`
 
-The harness does **not** modify cluster-level settings such as:
+The harness does not modify cluster-level settings such as:
 
 - `shared_buffers`
 - other restart-required PostgreSQL settings
 
-Those should be prepared by the user outside the benchmark harness.
+Prepare cluster-level settings outside the benchmark harness.
 
-## 12. Adding a New Variant
-
-Add a new `[[variant]]` entry in `config/variants.toml`.
-
-Example:
-
-```toml
-[[variant]]
-name = "my_new_algo"
-label = "My New Algorithm"
-session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "combined" }
-```
-
-If a variant needs a patch-specific cleanup GUC but should still remain runnable on stock PostgreSQL,
-add it under `optional_session_gucs` instead of `session_gucs`.
-
-Then run:
-
-```bash
-python3 bench/bench.py run main --variants dp,geqo,my_new_algo
-```
-
-## 13. Useful Overrides
+## 10. Useful Overrides
 
 The following overrides are available on `run`:
 
+- `--variants-file`
+- `--variants`
 - `--resume-run-id`
 - `--reps`
 - `--statement-timeout-ms`
@@ -312,11 +244,20 @@ The following overrides are available on `run`:
 - `--tag`
 - `--fail-on-error`
 
-`--warmup-runs` now means discarded warmup pass(es) per query group before that query group's measured repetitions. Use `--warmup-runs 0` if you want to disable the default warmup phase.
+`--warmup-runs` means discarded warmup pass(es) per query group before that
+query group's measured repetitions.  Use `--warmup-runs 0` to disable the
+default warmup phase.
 
-`--skip-measured-after-warmup-timeout` is enabled by default. If an exact `(dataset, query, variant)` hits `statement_timeout` during warmup, the harness records the later measured repetitions for that same combination as skipped timeout rows instead of re-running them. This saves time, but it is a conservative shortcut rather than proof that the measured phase would have timed out identically. Use `--no-skip-measured-after-warmup-timeout` to restore the older behavior.
+`--skip-measured-after-warmup-timeout` is enabled by default.  If an exact
+`(dataset, query, variant)` hits `statement_timeout` during warmup, the harness
+records later measured repetitions for that same combination as skipped timeout
+rows instead of re-running them.  Use `--no-skip-measured-after-warmup-timeout`
+to re-run measured repetitions even after a warmup timeout.
 
-`--resume-run-id` resumes an existing `outputs/<run_id>/` directory from the next unfinished safe group boundary. The harness only checkpoints after complete warmup groups `(warmup_pass, dataset, query_id)` and complete measured groups `(dataset, query_id, rep)`, so resume never continues from the middle of a query-group's variant set. This keeps per-query cross-variant comparisons aligned.
+`--resume-run-id` resumes an existing `outputs/<run_id>/` directory from the
+next unfinished safe group boundary.  The harness checkpoints after complete
+warmup groups and complete measured groups, so resume never continues from the
+middle of a query-group's variant set.
 
-`--tag` is intended for the local build or patch label under test, for example `--tag pg18_patch_v4`.
-These overrides are recorded in `run.json`.
+`--tag` labels the local build or patch under test, for example
+`--tag pg18_patch_v4`.
