@@ -55,21 +55,45 @@ than from the middle of a query's variant set.
 
 ## Cluster Memory Baseline
 
-The public runs use a small-memory benchmark environment.  Most controls are
-session-level and are applied by the harness, but `shared_buffers` is a
-cluster-level setting and must be configured before the benchmark:
+The public runs are designed to work on a modest benchmark machine rather than
+requiring a large-memory lab server.  The memory baseline is 16 GiB RAM or more.
+That lower bound leaves room for a 4 GiB PostgreSQL buffer pool, operating-system
+page cache, backend memory, and occasional large hash/sort operations while
+keeping the setup accessible.
+
+Most controls are session-level and are applied by the harness, but
+`shared_buffers` is a cluster-level PostgreSQL setting and must be configured
+before the benchmark:
 
 ```sql
 ALTER SYSTEM SET shared_buffers = '4GB';
 ```
 
 Restart PostgreSQL after changing `shared_buffers`.  The goal is not to claim
-that `4GB` is a universal PostgreSQL recommendation; it fixes the buffer-pool
-baseline for the submitted public runs.  The paired session settings
-`work_mem=1GB` and `effective_cache_size=8GB` keep memory-spill behavior and
-planner cache-size assumptions stable for that environment.
-`effective_cache_size` is a planner costing assumption, not memory allocated by
-the backend.
+that `4GB` is a universal PostgreSQL recommendation; it fixes a reproducible
+buffer-pool baseline for the submitted public runs.  With the 16 GiB minimum,
+`shared_buffers=4GB` is about 25% of RAM, which matches PostgreSQL's documented
+starting point for a dedicated database server with at least 1 GiB of RAM.
+
+The paired session settings `work_mem=1GB` and `effective_cache_size=8GB` are
+chosen for the same 16 GiB baseline:
+
+- `work_mem=1GB` reduces spill noise in these single-query, serial benchmark
+  runs.  It is intentionally high for a normal multi-user server; the harness
+  executes one measured query at a time and sets
+  `max_parallel_workers_per_gather=0`, so this is a controlled benchmark setting
+  rather than a production default.
+- `effective_cache_size=8GB` tells the planner to assume roughly half of the
+  16 GiB host can act as effective cache across PostgreSQL shared buffers and
+  the operating-system page cache.  It is only a planner costing assumption; it
+  does not allocate PostgreSQL memory.
+
+References:
+
+- PostgreSQL resource configuration:
+  <https://www.postgresql.org/docs/current/runtime-config-resource.html>
+- PostgreSQL query-planning configuration:
+  <https://www.postgresql.org/docs/current/runtime-config-query.html>
 
 ## Session Setup
 
@@ -168,24 +192,12 @@ PostgreSQL documents that `Planning Time` is plan generation time, while
 `Execution Time` excludes parsing, rewriting, and planning.  It also documents
 that statement runtime is still measured when node-level timing is disabled.
 
-On the PostgreSQL development branch, commit
-`294520c44487ecaade7a6ea8781b973f9ed03909` further reduced
-`EXPLAIN ANALYZE` timing overhead on x86-64 by using the CPU time-stamp counter
-for instrumentation timing.  The benchmark still uses `TIMING OFF` because
-per-node timings are not needed for join-order comparisons.  Builds without
-that commit may have higher instrumentation overhead, but the benchmark protocol
-remains the same across compared variants in a submitted run.
-
 References:
 
 - PostgreSQL `EXPLAIN` documentation:
   <https://www.postgresql.org/docs/current/using-explain.html>
 - PostgreSQL `EXPLAIN` command reference:
   <https://www.postgresql.org/docs/current/sql-explain.html>
-- PostgreSQL commit message:
-  <https://www.mail-archive.com/pgsql-committers%40lists.postgresql.org/msg45536.html>
-- PostgreSQL commit diff:
-  <https://git.postgresql.org/pg/commitdiff/294520c44487ecaade7a6ea8781b973f9ed03909>
 
 ## Result Artifacts
 

@@ -31,13 +31,15 @@ execution behavior.
 
 ## Benchmark Defaults
 
-The public runs use a fixed small-memory benchmark environment.  The harness
-applies session-level settings, but restart-required settings must be configured
-before running benchmarks.
+This section lists the settings that matter most when interpreting published
+results.  The public defaults are chosen so the benchmark can run on a machine
+with at least 16 GiB of RAM without tuning memory values per machine.  The
+harness applies session-level settings, but restart-required settings must be
+configured before running benchmarks.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `shared_buffers` | `4GB` | cluster-level buffer pool baseline; set before the run and restart PostgreSQL |
+| `shared_buffers` | `4GB` | cluster-level buffer pool baseline, about 25% of the 16 GiB minimum; set before the run and restart PostgreSQL |
 | measured repetitions | `3` | compute per-query medians without making public runs too long |
 | statement timeout | `600000 ms` | bound pathological plans and record them as timeouts |
 | warmup | `1` discarded warmup pass per query group | reduce first-run effects before recorded repetitions |
@@ -45,8 +47,8 @@ before running benchmarks.
 | variant order | `rotate` | avoid always giving the same variant the same position in a query group |
 | `join_collapse_limit` | `100` | allow the join-order algorithm under test to see wide join search spaces |
 | `max_parallel_workers_per_gather` | `0` | reduce execution-time noise from parallel workers |
-| `work_mem` | `1GB` | reduce memory-spill noise in the submitted small-memory environment |
-| `effective_cache_size` | `8GB` | keep planner cache-size costing assumptions stable |
+| `work_mem` | `1GB` | reduce spill noise for single-query serial benchmark runs |
+| `effective_cache_size` | `8GB` | keep planner cache-size assumptions stable for the 16 GiB baseline |
 
 `shared_buffers` is not changed by the harness.  If following the public setup,
 apply it outside the run and restart PostgreSQL:
@@ -55,8 +57,9 @@ apply it outside the run and restart PostgreSQL:
 ALTER SYSTEM SET shared_buffers = '4GB';
 ```
 
-The other settings above are applied as session settings and are recorded in
-`run.json`.
+The other settings above are applied as session settings by the harness and are
+recorded in `run.json`.  See [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the
+memory-setting rationale and caveats.
 
 ## Minimal Reproduction
 
@@ -99,3 +102,4 @@ artifact layout and table format are documented in [OUTPUTS.md](OUTPUTS.md).
 - [DATASETS.md](DATASETS.md): workload coverage, IMDB CSV setup, and query counts
 - [OUTPUTS.md](OUTPUTS.md): run artifacts, public reports, and reviewer tables
 - [config/README.md](config/README.md): scenario and variant file fields
+- [bench/README.md](bench/README.md): benchmark harness module layout
