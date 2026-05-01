@@ -15,9 +15,15 @@ You need:
 - `psql` in `PATH`
 - Python 3.11 or newer
 - the external IMDB CSV bundle when preparing IMDB-backed datasets
+- a database role that can connect to the `postgres` maintenance database and
+  create the benchmark databases used by `prepare`
 
 The documented reproduction path is Python 3.11+ only.  No extra Python package
 is required for TOML parsing on supported Python versions.
+
+Following the public `shared_buffers=4GB` setup also requires either superuser
+access for `ALTER SYSTEM` or direct access to the PostgreSQL server
+configuration, followed by a server restart.
 
 If you use a custom PostgreSQL build, expose its binaries first:
 
@@ -57,7 +63,7 @@ an explicit `--variants` list for any patch-specific algorithm.
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-Variant fields are documented in [config/README.md](config/README.md).
+Variant fields are documented in [examples/README.md](examples/README.md).
 
 ## 3. Data Setup
 
@@ -150,12 +156,10 @@ outputs/<run_id>/
   run.json
   raw.csv
   summary.csv
-  public_report.md
-  public_report.json
 ```
 
-The detailed artifact contract, column meanings, console output, public-report
-format, and reviewer-table examples are documented in [OUTPUTS.md](OUTPUTS.md).
+The detailed artifact contract, column meanings, console output, and
+reviewer-table examples are documented in [OUTPUTS.md](OUTPUTS.md).
 
 ## 8. Reviewer Tables
 
@@ -204,12 +208,6 @@ Recommended result columns:
   Planner overhead, reported separately from execution.
 - `plan_total_cost_median`
   Planner-side diagnostic signal, not a runtime substitute.
-
-To re-render the default public report:
-
-```bash
-python3 tools/render_public_reports.py outputs/<run_id>
-```
 
 ## 10. Run Protocol And PostgreSQL Settings
 

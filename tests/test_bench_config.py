@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_common import DatasetSpec, Scenario
-from bench_config import load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
+from bench_config import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
 
 
 class BenchConfigTests(unittest.TestCase):
@@ -36,6 +36,16 @@ class BenchConfigTests(unittest.TestCase):
 
         self.assertIn("dp", variants)
         self.assertIn("hybrid_search", variants)
+
+    def test_load_scenarios_uses_built_in_definitions(self) -> None:
+        scenarios = load_scenarios()
+
+        self.assertEqual(tuple(scenarios), ("main", "extended", "full"))
+        self.assertEqual(
+            [spec.dataset for spec in scenarios["main"].datasets],
+            ["job", "job_complex"],
+        )
+        self.assertEqual(scenarios["full"].datasets[-1].dataset, "imdb_ceb_3k")
 
     def test_load_variants_accepts_custom_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

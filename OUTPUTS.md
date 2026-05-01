@@ -13,8 +13,6 @@ outputs/<run_id>/
   run.json
   raw.csv
   summary.csv
-  public_report.md
-  public_report.json
 ```
 
 `<run_id>` is generated as:
@@ -53,8 +51,8 @@ If failures occur, the harness prints grouped summaries such as:
 ```text
 [run] warmup_timeouts=1
 [run] warmup_timeout dataset=job variant=geqo query=29a: ERROR: canceling statement due to statement timeout
-[run] timeouts=1
-[run] timeout dataset=job variant=geqo query=29a: skipped measured run after warmup timeout: ERROR: canceling statement due to statement timeout
+[run] skipped_timeouts=1
+[run] skipped_timeout dataset=job variant=geqo query=29a: skipped measured run after warmup timeout: ERROR: canceling statement due to statement timeout
 [run] completed with non-fatal failures
 ```
 
@@ -63,7 +61,7 @@ command exit non-zero after writing the current artifacts.
 
 ## `run.json`
 
-`run.json` is the run context used to explain and re-render reports.  It is
+`run.json` is the run context used to explain and render reviewer tables.  It is
 intentionally not a full machine or git provenance snapshot.
 
 Important fields:
@@ -72,7 +70,7 @@ Important fields:
 | --- | --- |
 | `run_id` | Output directory id. |
 | `scenario` | Scenario name, such as `main`, `extended`, or `full`. |
-| `scenario_description` | Description from `config/scenarios.toml`. |
+| `scenario_description` | Description from the built-in scenario definition. |
 | `protocol.reps` | Number of measured repetitions per query and variant. |
 | `protocol.statement_timeout_ms` | Per-statement timeout used during measurement. |
 | `protocol.stabilize` | Stabilization mode, for example `vacuum_freeze_analyze`. |
@@ -89,7 +87,8 @@ Important fields:
 | `progress` | Resume state and whether the run completed. |
 
 Use `run.json` when a reviewer needs to check which scenario, variants, session
-GUCs, timeouts, warmup settings, and dataset filters produced a result table.
+GUCs, timeouts, warmup settings, and built-in dataset restrictions produced a
+result table.
 Restart-required cluster settings, such as `shared_buffers`, are not changed by
 the harness and should be recorded with the published result set when they
 matter for review.
@@ -153,34 +152,7 @@ Columns:
 If a query/variant has no successful measured repetition, the median columns are
 empty and `ok_reps` is `0`.
 
-Use `summary.csv` for per-query ratio tables and public reports.
-
-## Public Reports
-
-`public_report.md` and `public_report.json` are generated from `summary.csv`.
-They contain the same information in human-readable Markdown and
-machine-readable JSON.
-
-The public report is a compact overview, not the final spreadsheet attachment.
-For each dataset and for execution/planning metrics separately, it includes:
-
-- coverage: successful, missing, and comparable query counts
-- ratio summary: wins, within 5%, slower than 5%, geometric mean, mean, p50,
-  p90, p95, optional p99, and max ratio
-- tail counts: number of queries above fixed slowdown thresholds
-- workload totals: summed median metric values over comparable queries
-- worst queries for execution time
-- planning share: planning time divided by planning plus execution time
-
-The reference variant is `dp` when present; otherwise the first resolved variant
-is used.  Public-report ratios are direct `variant/reference` ratios, and rows
-with non-positive reference metrics are omitted from ratio summaries.
-
-Re-render the public reports from an existing run directory with:
-
-```bash
-python3 tools/render_public_reports.py outputs/<run_id>
-```
+Use `summary.csv` for per-query ratio tables and reviewer table rendering.
 
 ## Reviewer Tables
 

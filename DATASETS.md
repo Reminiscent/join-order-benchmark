@@ -73,26 +73,6 @@ Scenario-level coverage is documented in [SCENARIOS.md](SCENARIOS.md).  This
 file only records dataset sources, local adaptations, data requirements, and
 query-count metadata.
 
-## Prepare Commands
-
-Prepare `main`:
-
-```bash
-python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
-```
-
-Prepare `extended`:
-
-```bash
-python3 bench/bench.py prepare extended --csv-dir "$(pwd)/data/imdb_csv"
-```
-
-Prepare `full`:
-
-```bash
-python3 bench/bench.py prepare full --csv-dir "$(pwd)/data/imdb_csv"
-```
-
 ## Query Manifest
 
 The global query manifest is [meta/query_manifest.csv](meta/query_manifest.csv).

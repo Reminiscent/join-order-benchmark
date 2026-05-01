@@ -10,7 +10,6 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from bench_catalog import available_datasets, dataset_db_name
 from bench_common import (
-    SCENARIOS_CONFIG_PATH,
     DEFAULT_VARIANTS_CONFIG_PATH,
     DatasetSpec,
     ResolvedDatasetRun,
@@ -19,6 +18,52 @@ from bench_common import (
     die,
     parse_csv_list,
 )
+
+
+DEFAULT_SCENARIO_VARIANTS = ("dp", "geqo")
+DEFAULT_SCENARIO_REPS = 3
+DEFAULT_STATEMENT_TIMEOUT_MS = 600000
+DEFAULT_STABILIZE = "vacuum_freeze_analyze"
+DEFAULT_VARIANT_ORDER_MODE = "rotate"
+DEFAULT_SESSION_GUCS = (
+    ("join_collapse_limit", 100),
+    ("max_parallel_workers_per_gather", 0),
+    ("work_mem", "1GB"),
+    ("effective_cache_size", "8GB"),
+)
+
+MAIN_DATASETS = (
+    DatasetSpec(dataset="job"),
+    DatasetSpec(dataset="job_complex"),
+)
+
+EXTENDED_EXTRA_DATASETS = (
+    DatasetSpec(dataset="sqlite_select5"),
+    DatasetSpec(dataset="gpuqo_chain_small"),
+    DatasetSpec(dataset="gpuqo_star_small"),
+    DatasetSpec(dataset="gpuqo_snowflake_small"),
+    DatasetSpec(dataset="gpuqo_clique_small", exclude_variants=("dp",)),
+    DatasetSpec(dataset="gpuqo_clique_small", variants=("dp",), max_join=12),
+)
+
+
+def built_in_scenario(
+    *,
+    name: str,
+    description: str,
+    datasets: tuple[DatasetSpec, ...],
+) -> Scenario:
+    return Scenario(
+        name=name,
+        description=description,
+        default_variants=DEFAULT_SCENARIO_VARIANTS,
+        reps=DEFAULT_SCENARIO_REPS,
+        statement_timeout_ms=DEFAULT_STATEMENT_TIMEOUT_MS,
+        stabilize=DEFAULT_STABILIZE,
+        variant_order_mode=DEFAULT_VARIANT_ORDER_MODE,
+        session_gucs=DEFAULT_SESSION_GUCS,
+        datasets=datasets,
+    )
 
 
 def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
@@ -56,83 +101,25 @@ def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
 
 
 def load_scenarios() -> dict[str, Scenario]:
-    if not SCENARIOS_CONFIG_PATH.is_file():
-        die(f"missing scenarios config: {SCENARIOS_CONFIG_PATH}")
-    data = tomllib.loads(SCENARIOS_CONFIG_PATH.read_text())
-    raw_scenarios = data.get("scenario")
-    if not isinstance(raw_scenarios, dict) or not raw_scenarios:
-        die(f"{SCENARIOS_CONFIG_PATH} must define at least one [scenario.<name>] entry")
-
-    known_datasets = set(available_datasets())
-    out: dict[str, Scenario] = {}
-    for name, cfg in raw_scenarios.items():
-        if not isinstance(cfg, dict):
-            die(f"bad scenario entry '{name}' in {SCENARIOS_CONFIG_PATH}")
-        description = str(cfg.get("description", "")).strip()
-        raw_default_variants = cfg.get("default_variants", [])
-        if not isinstance(raw_default_variants, list):
-            die(f"scenario '{name}' has invalid default_variants in {SCENARIOS_CONFIG_PATH}")
-        default_variants = tuple(str(item) for item in raw_default_variants if str(item).strip())
-        reps = int(cfg.get("reps", 1))
-        statement_timeout_ms = int(cfg.get("statement_timeout_ms", 0))
-        stabilize = str(cfg.get("stabilize", "none"))
-        variant_order_mode = str(cfg.get("variant_order_mode", "fixed"))
-        raw_session_gucs = cfg.get("session_gucs", {})
-        if not isinstance(raw_session_gucs, dict):
-            die(f"scenario '{name}' has invalid session_gucs in {SCENARIOS_CONFIG_PATH}")
-
-        raw_datasets = cfg.get("dataset", [])
-        if not isinstance(raw_datasets, list):
-            die(f"scenario '{name}' has invalid dataset entries in {SCENARIOS_CONFIG_PATH}")
-
-        datasets: list[DatasetSpec] = []
-        for item in raw_datasets:
-            if not isinstance(item, dict):
-                die(f"scenario '{name}' has invalid dataset entry in {SCENARIOS_CONFIG_PATH}")
-            dataset = str(item.get("name", "")).strip()
-            if not dataset:
-                die(f"scenario '{name}' has dataset entry without name in {SCENARIOS_CONFIG_PATH}")
-            if dataset not in known_datasets:
-                die(f"scenario '{name}' references unknown dataset '{dataset}'")
-            raw_variants = item.get("variants")
-            variants: Optional[tuple[str, ...]]
-            if raw_variants is None:
-                variants = None
-            else:
-                if not isinstance(raw_variants, list):
-                    die(f"scenario '{name}' dataset '{dataset}' has invalid variants list")
-                variants = tuple(str(v) for v in raw_variants if str(v).strip())
-            raw_exclude_variants = item.get("exclude_variants")
-            exclude_variants: Optional[tuple[str, ...]]
-            if raw_exclude_variants is None:
-                exclude_variants = None
-            else:
-                if variants is not None:
-                    die(f"scenario '{name}' dataset '{dataset}' cannot define both variants and exclude_variants")
-                if not isinstance(raw_exclude_variants, list):
-                    die(f"scenario '{name}' dataset '{dataset}' has invalid exclude_variants list")
-                exclude_variants = tuple(str(v) for v in raw_exclude_variants if str(v).strip())
-            datasets.append(
-                DatasetSpec(
-                    dataset=dataset,
-                    max_join=int(item["max_join"]) if "max_join" in item else None,
-                    variants=variants,
-                    exclude_variants=exclude_variants,
-                )
-            )
-
-        out[name] = Scenario(
-            name=name,
-            description=description,
-            default_variants=default_variants,
-            reps=reps,
-            statement_timeout_ms=statement_timeout_ms,
-            stabilize=stabilize,
-            variant_order_mode=variant_order_mode,
-            session_gucs=tuple((str(k), v) for k, v in raw_session_gucs.items()),
-            datasets=tuple(datasets),
-        )
-    return out
+    extended_datasets = MAIN_DATASETS + EXTENDED_EXTRA_DATASETS
+    scenarios = (
+        built_in_scenario(
+            name="main",
+            description="Primary algorithm validation path on complete JOB and JOB-Complex.",
+            datasets=MAIN_DATASETS,
+        ),
+        built_in_scenario(
+            name="extended",
+            description="Broader validation with self-contained planning-stress workloads, excluding CEB IMDB 3k.",
+            datasets=extended_datasets,
+        ),
+        built_in_scenario(
+            name="full",
+            description="Complete built-in workload, including the heavy CEB IMDB 3k suite.",
+            datasets=extended_datasets + (DatasetSpec(dataset="imdb_ceb_3k"),),
+        ),
+    )
+    return {scenario.name: scenario for scenario in scenarios}
 
 
 def resolve_variant_names(

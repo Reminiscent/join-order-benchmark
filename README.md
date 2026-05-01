@@ -22,7 +22,7 @@ documents how those tables were produced.
 | Which broader workloads are included? | `extended` adds small-data planning/search-space stress workloads; `full` adds the heavier CEB IMDB 3k subset.  See [SCENARIOS.md](SCENARIOS.md) and [DATASETS.md](DATASETS.md). |
 | Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an explicit `--variants` list and variants file. |
 | How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) maps the public commands to the runner steps: prepare data, stabilize tables, warm up, measure, and write artifacts. |
-| What run settings were used? | The public run protocol and PostgreSQL settings are listed below.  `run.json` records the exact scenario, variants, dataset filters, repetition count, timeout, warmup policy, and session GUCs used by a run. |
+| What run settings were used? | The public run protocol and PostgreSQL settings are listed below.  `run.json` records the exact scenario, variants, built-in dataset restrictions, repetition count, timeout, warmup policy, and session GUCs used by a run. |
 | How were timings collected? | PostgreSQL `EXPLAIN ANALYZE` JSON output is used to separate planning and execution time.  `TIMING OFF` reduces node-level timing overhead; caveats are in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md). |
 
 The primary execution metric is `execution_ms_median`.  Planning time is a
@@ -78,7 +78,9 @@ caveats.
 ## Minimal Reproduction
 
 Requirements: Python 3.11+, `psql` in `PATH`, a reachable PostgreSQL instance,
-and the IMDB CSV bundle for IMDB-backed workloads.
+a database role that can create the benchmark databases, and the IMDB CSV bundle
+for IMDB-backed workloads.  If following the public `shared_buffers=4GB` setup,
+the PostgreSQL server must be configured and restarted before the measured run.
 
 Prepare and run the primary validation scenario with portable baselines:
 
@@ -102,11 +104,10 @@ resume behavior, and useful overrides.
 Run outputs are local and ignored by git.  They are mainly for auditability and
 for producing the separate result tables posted to the community thread.
 
-Each `run` creates `outputs/<run_id>/` with `run.json`, `raw.csv`,
-`summary.csv`, and rendered public-report files.  Reviewer-facing Excel/CSV
-tables can be rendered from `summary.csv` with
-[tools/render_review_tables.py](tools/render_review_tables.py).  The full
-artifact layout and table format are documented in [OUTPUTS.md](OUTPUTS.md).
+Each `run` creates `outputs/<run_id>/` with `run.json`, `raw.csv`, and
+`summary.csv`.  Reviewer-facing Excel/CSV tables can be rendered from
+`summary.csv` with [tools/render_review_tables.py](tools/render_review_tables.py).
+The full artifact layout and table format are documented in [OUTPUTS.md](OUTPUTS.md).
 
 ## Repository Layout
 
@@ -115,11 +116,10 @@ Top-level folders are split by responsibility:
 | Path | Purpose |
 | --- | --- |
 | `bench/` | benchmark CLI and harness modules for prepare, run, timing collection, and result summarization |
-| `config/` | built-in scenario definitions |
 | `examples/` | default and example variant definitions, including portable `dp` and `geqo` baselines |
 | `meta/` | generated query manifest used for dataset metadata such as join size and query count |
-| `tools/` | helper scripts for refreshing metadata and rendering reviewer-facing reports or tables |
-| `tests/` | unit tests for scenario parsing, run behavior, and reviewer table rendering |
+| `tools/` | helper scripts for refreshing metadata and rendering reviewer-facing tables |
+| `tests/` | unit tests for built-in scenario resolution, run behavior, and reviewer table rendering |
 | `join-order-benchmark/` | local JOB workload adaptation |
 | `JOB-Complex/` | local JOB-Complex workload adaptation |
 | `imdb_pg_dataset/` | IMDB-backed schema, load scripts, and CEB IMDB 3k query subset |
@@ -134,6 +134,6 @@ Top-level folders are split by responsibility:
 - [REPRODUCE.md](REPRODUCE.md): full reproduction workflow and CLI overrides
 - [SCENARIOS.md](SCENARIOS.md): scenario layers
 - [DATASETS.md](DATASETS.md): workload coverage, IMDB CSV setup, and query counts
-- [OUTPUTS.md](OUTPUTS.md): run artifacts, public reports, and reviewer tables
-- [config/README.md](config/README.md): scenario and variant file fields
+- [OUTPUTS.md](OUTPUTS.md): run artifacts and reviewer tables
+- [examples/README.md](examples/README.md): variant file fields
 - [bench/README.md](bench/README.md): benchmark harness module layout

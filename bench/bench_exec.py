@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from bench_common import ConnOpts, Variant, die, psql_sql, psql_sql_raw, sql_literal
-from bench_environment import guc_exists
+from bench_common import ConnOpts, Variant, die, psql_cmd, psql_sql, psql_sql_raw, run_cmd, sql_literal
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,20 @@ def first_error_line(output: str) -> str:
 
 def is_statement_timeout_error(message: str) -> bool:
     return "statement timeout" in message.lower()
+
+
+def current_setting(db: str, name: str, conn: Optional[ConnOpts] = None) -> Optional[str]:
+    sql = f"SELECT current_setting({sql_literal(name)}, true);\n"
+    p = run_cmd(psql_cmd(db, conn) + ["-At"], input_text=sql, check=False)
+    if p.returncode != 0:
+        return None
+    value = (p.stdout or "").strip()
+    return value or None
+
+
+@functools.lru_cache(maxsize=None)
+def guc_exists(db: str, conn: Optional[ConnOpts], name: str) -> bool:
+    return current_setting(db, name, conn) is not None
 
 
 def build_session_prelude(

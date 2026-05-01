@@ -13,17 +13,20 @@ from bench_common import (
     Scenario,
     Variant,
     die,
+    psql_cmd,
+    run_cmd,
     safe_artifact_name,
     utc_now,
 )
-from bench_environment import ensure_databases_reachable, resolved_variant_session_gucs, validate_required_gucs
 from bench_exec import (
     StatementTimeoutError,
+    current_setting,
+    first_error_line,
+    guc_exists,
     rotate_variants,
     run_one,
     stabilize_db,
 )
-from bench_public_report import write_public_reports
 from bench_results import build_run_context, write_raw_csv, write_run_context, write_summary_csv
 
 
@@ -67,6 +70,59 @@ def print_failure_rows(*, label: str, rows: list[dict[str, str]]) -> None:
         )
     if len(rows) > 5:
         print(f"[run] ... and {len(rows) - 5} more {label}")
+
+
+def ensure_databases_reachable(dbs: list[str], conn: Optional[ConnOpts] = None) -> None:
+    for db in dbs:
+        p = run_cmd(psql_cmd(db, conn) + ["-At"], input_text="SELECT 1;\n", check=False)
+        if p.returncode == 0:
+            continue
+        out = (p.stdout or "") + (p.stderr or "")
+        die(
+            f"cannot connect to benchmark database '{db}': "
+            f"{first_error_line(out) or 'connection failed'}. "
+            "Run prepare first or fix the PostgreSQL connection flags."
+        )
+
+
+def resolved_variant_session_gucs(
+    db: str,
+    conn: Optional[ConnOpts],
+    variant: Variant,
+) -> tuple[tuple[str, object], ...]:
+    resolved = list(variant.session_gucs)
+    for name, value in variant.optional_session_gucs:
+        if guc_exists(db, conn, name):
+            resolved.append((name, value))
+    return tuple(resolved)
+
+
+def validate_required_gucs(
+    db: str,
+    conn: Optional[ConnOpts],
+    scenario: Scenario,
+    variants_registry: dict[str, Variant],
+    variant_names: tuple[str, ...],
+) -> None:
+    missing_scenario = [name for name, _ in scenario.session_gucs if current_setting(db, name, conn) is None]
+    if missing_scenario:
+        die(
+            f"scenario '{scenario.name}' requires unsupported PostgreSQL parameter(s): "
+            f"{', '.join(sorted(missing_scenario))}"
+        )
+
+    missing_by_variant: list[str] = []
+    for variant_name in variant_names:
+        variant = variants_registry[variant_name]
+        missing = [name for name, _ in variant.session_gucs if current_setting(db, name, conn) is None]
+        if missing:
+            missing_by_variant.append(f"{variant_name}: {', '.join(sorted(missing))}")
+
+    if missing_by_variant:
+        die(
+            "selected variant(s) require unsupported PostgreSQL parameter(s): "
+            + " | ".join(missing_by_variant)
+        )
 
 
 def dataset_contexts(resolved_runs: list[ResolvedDatasetRun]) -> list[dict[str, Any]]:
@@ -236,14 +292,6 @@ def flush_outputs(
         "completed_measured_groups": serialize_measured_groups(completed_measured_groups),
     }
 
-    public_report_markdown_path = out_dir / "public_report.md"
-    public_report_json_path = out_dir / "public_report.json"
-    write_public_reports(
-        run_context=run_context,
-        summary_path=summary_path,
-        markdown_path=public_report_markdown_path,
-        json_path=public_report_json_path,
-    )
     write_run_context(out_dir / "run.json", run_context)
 
 
@@ -620,12 +668,17 @@ def run_scenario(
 
     warmup_timeout_rows = [row for row in warmup_failures if row["category"] == "statement_timeout"]
     warmup_error_rows = [row for row in warmup_failures if row["category"] == "error"]
-    timeout_rows = [row for row in raw_rows if row["status"] == "timeout"]
     skipped_timeout_rows = [
         row
         for row in raw_rows
         if row["status"] == "timeout"
         and row["error"].startswith("skipped measured run after warmup timeout:")
+    ]
+    timeout_rows = [
+        row
+        for row in raw_rows
+        if row["status"] == "timeout"
+        and not row["error"].startswith("skipped measured run after warmup timeout:")
     ]
     err_rows = [row for row in raw_rows if row["status"] == "error"]
 
@@ -645,7 +698,7 @@ def run_scenario(
         print_failure_rows(label="errors", rows=err_rows)
         if fail_on_error:
             raise SystemExit(1)
-    elif warmup_failures or timeout_rows:
+    elif warmup_failures or skipped_timeout_rows or timeout_rows:
         print("[run] completed with non-fatal failures")
     else:
         print("[run] completed without errors")

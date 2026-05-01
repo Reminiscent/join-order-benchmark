@@ -3,8 +3,9 @@
 This document describes the built-in benchmark scenarios.  The top-level README
 keeps only the reviewer entry points.
 
-Scenario definitions are stored in [config/scenarios.toml](config/scenarios.toml).
-Dataset-level query counts and join sizes come from
+Scenarios are built into the benchmark harness.  They are intentionally not a
+user-facing configuration layer; choose one by name with `bench.py prepare` and
+`bench.py run`.  Dataset-level query counts and join sizes come from
 [meta/query_manifest.csv](meta/query_manifest.csv).
 
 ## Built-In Scenario Layers
@@ -12,7 +13,7 @@ Dataset-level query counts and join sizes come from
 | Scenario | When to use it | Included datasets |
 | --- | --- | --- |
 | `main` | First validation run for a new join-order algorithm | `job`, `job_complex` |
-| `extended` | Broader planning/search-space validation after `main` looks good | `main` plus `sqlite_select5`, `gpuqo_chain_small`, `gpuqo_clique_small`, `gpuqo_star_small`, `gpuqo_snowflake_small` |
+| `extended` | Broader planning/search-space validation after `main` looks good | `main` plus `sqlite_select5`, `gpuqo_chain_small`, `gpuqo_star_small`, `gpuqo_snowflake_small`, `gpuqo_clique_small` |
 | `full` | Complete built-in campaign | `extended` plus `imdb_ceb_3k` |
 
 ## `main`
@@ -37,9 +38,9 @@ workloads:
 | --- | ---: | --- | --- | --- |
 | `sqlite_select5` | 732 | 4-64 | self-contained toy data | high-width join stress converted from SQLite select5 |
 | `gpuqo_chain_small` | 150 | 2-16 | self-contained synthetic data | chain-shaped join graph stress |
-| `gpuqo_clique_small` | 150 | 2-16 | self-contained synthetic data | dense clique-shaped join graph stress |
 | `gpuqo_star_small` | 150 | 2-16 | self-contained synthetic data | star-shaped join graph stress |
 | `gpuqo_snowflake_small` | 390 | 2-40 | self-contained synthetic data | wider snowflake-shaped join graph stress |
+| `gpuqo_clique_small` | 150 | 2-16 | self-contained synthetic data | dense clique-shaped join graph stress |
 
 These extra workloads are adapted from existing upstream sources rather than
 invented locally.  They intentionally use small local data:

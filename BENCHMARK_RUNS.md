@@ -23,9 +23,9 @@ python3 bench/bench.py run main \
 
 ## Prepare Phase
 
-`bench.py prepare <scenario>` resolves the datasets listed in
-[config/scenarios.toml](config/scenarios.toml), creates the target PostgreSQL
-databases, and loads each dataset's schema and data.
+`bench.py prepare <scenario>` resolves the datasets in the built-in scenario,
+creates the target PostgreSQL databases, and loads each dataset's schema and
+data.
 
 IMDB-backed datasets require `--csv-dir` because the CSV bundle is not vendored
 in this repository.  Self-contained datasets, including SQLite select5 and GPUQO
@@ -35,19 +35,19 @@ small workloads, load local SQL files.
 
 `bench.py run <scenario>` performs these steps:
 
-1. Read the selected scenario from [config/scenarios.toml](config/scenarios.toml).
+1. Read the selected built-in scenario.
 2. Read variant definitions from [examples/variants.toml](examples/variants.toml)
    or the submitted `--variants-file`.
 3. Resolve the explicit `--variants` list, or use the scenario's
    `default_variants`.
-4. Apply scenario dataset filters, such as the `gpuqo_clique_small` `dp`
+4. Apply built-in dataset restrictions, such as the `gpuqo_clique_small` `dp`
    `join_size <= 12` guard.
 5. Check that benchmark databases are reachable and required GUCs exist.
 6. Stabilize each prepared database when requested by the scenario.
 7. For each selected query, run discarded warmup pass(es), then measured
    repetitions.
-8. Flush `run.json`, `raw.csv`, `summary.csv`, `public_report.md`, and
-   `public_report.json` after safe progress boundaries.
+8. Flush `run.json`, `raw.csv`, and `summary.csv` after safe progress
+   boundaries.
 
 The runner checkpoints progress after complete warmup groups and complete
 measured groups, so `--resume-run-id` resumes from a safe group boundary rather
@@ -118,11 +118,8 @@ configured outside the benchmark if a submitted run depends on them.
 
 ## Stabilization
 
-The built-in public scenarios use:
-
-```toml
-stabilize = "vacuum_freeze_analyze"
-```
+The built-in public scenarios use the `vacuum_freeze_analyze` stabilization
+mode.
 
 That mode executes:
 
@@ -147,9 +144,9 @@ query 2: warm up all selected variants, then measure rep 1..N
 
 Warmup executions are not written to `raw.csv` or `summary.csv`.
 
-`variant_order_mode = "rotate"` rotates variant order across query groups and
-repetitions.  This avoids always measuring the same variant first or last for
-every query.
+The built-in variant order is `rotate`, which rotates variant order across query
+groups and repetitions.  This avoids always measuring the same variant first or
+last for every query.
 
 If a warmup execution hits `statement_timeout`, the default behavior is to skip
 later measured repetitions for the exact `(dataset, query, variant)` tuple and
@@ -208,8 +205,6 @@ outputs/<run_id>/
   run.json
   raw.csv
   summary.csv
-  public_report.md
-  public_report.json
 ```
 
 Use [OUTPUTS.md](OUTPUTS.md) for column definitions, console-output semantics,

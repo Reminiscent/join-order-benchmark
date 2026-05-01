@@ -10,7 +10,6 @@ from typing import Any, Optional
 from xml.sax.saxutils import escape as xml_escape
 
 from bench_common import safe_artifact_name
-from bench_public_report import SummaryRow, load_summary_rows, public_label
 
 
 METRICS = {
@@ -21,6 +20,34 @@ METRICS = {
 DEFAULT_METRICS = ("execution", "planning")
 DEFAULT_REFERENCE_VARIANT = "dp"
 XLSX_PAGE_ORIENTATION = "landscape"
+PUBLIC_LABELS = {
+    "dp": "DP",
+    "geqo": "GEQO",
+    "goo_cost": "GOO(cost)",
+    "goo_result_size": "GOO(result_size)",
+    "goo_selectivity": "GOO(selectivity)",
+    "goo_combined": "GOO(combined)",
+    "hybrid_search": "Hybrid Search",
+}
+
+
+@dataclass(frozen=True)
+class SummaryRow:
+    dataset: str
+    variant: str
+    query_id: str
+    query_label: str
+    query_path: str
+    join_size: int
+    ok_reps: int
+    err_reps: int
+    planning_ms_median: float | None
+    execution_ms_median: float | None
+    total_ms_median: float | None
+    plan_total_cost_median: float | None
+
+    def metric_value(self, column: str) -> float | None:
+        return getattr(self, column)
 
 
 @dataclass(frozen=True)
@@ -61,6 +88,65 @@ def parse_csv_list(raw: Optional[str]) -> list[str]:
     if raw is None:
         return []
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def maybe_float(raw: str) -> float | None:
+    text = raw.strip()
+    if not text:
+        return None
+    return float(text)
+
+
+def public_label(variant: str, label_by_name: dict[str, str]) -> str:
+    return PUBLIC_LABELS.get(variant, label_by_name.get(variant, variant))
+
+
+def load_summary_rows(summary_path: Path) -> tuple[dict[str, dict[str, dict[str, SummaryRow]]], dict[str, list[str]]]:
+    rows: dict[str, dict[str, dict[str, SummaryRow]]] = {}
+    query_order: dict[str, list[str]] = {}
+    with summary_path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        required = {
+            "dataset",
+            "variant",
+            "query_id",
+            "query_label",
+            "query_path",
+            "join_size",
+            "ok_reps",
+            "err_reps",
+            "planning_ms_median",
+            "execution_ms_median",
+            "total_ms_median",
+            "plan_total_cost_median",
+        }
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise SystemExit(f"missing required columns in {summary_path}: {', '.join(sorted(missing))}")
+
+        seen_query_ids: dict[str, set[str]] = {}
+        for raw in reader:
+            row = SummaryRow(
+                dataset=raw["dataset"],
+                variant=raw["variant"],
+                query_id=raw["query_id"],
+                query_label=raw["query_label"],
+                query_path=raw["query_path"],
+                join_size=int(raw["join_size"]),
+                ok_reps=int(raw["ok_reps"] or "0"),
+                err_reps=int(raw["err_reps"] or "0"),
+                planning_ms_median=maybe_float(raw["planning_ms_median"]),
+                execution_ms_median=maybe_float(raw["execution_ms_median"]),
+                total_ms_median=maybe_float(raw["total_ms_median"]),
+                plan_total_cost_median=maybe_float(raw["plan_total_cost_median"]),
+            )
+            rows.setdefault(row.dataset, {}).setdefault(row.variant, {})[row.query_id] = row
+            seen_query_ids.setdefault(row.dataset, set())
+            query_order.setdefault(row.dataset, [])
+            if row.query_id not in seen_query_ids[row.dataset]:
+                seen_query_ids[row.dataset].add(row.query_id)
+                query_order[row.dataset].append(row.query_id)
+    return rows, query_order
 
 
 def natural_key(text: str) -> list[object]:

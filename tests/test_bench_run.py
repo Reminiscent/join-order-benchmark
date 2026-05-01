@@ -31,17 +31,6 @@ def write_summary_csv_stub(summary_path: Path, **_: object) -> None:
     )
 
 
-def write_public_reports_stub(
-    *,
-    markdown_path: Path,
-    json_path: Path,
-    **_: object,
-) -> dict[str, object]:
-    markdown_path.write_text("# Public Benchmark Report\n")
-    json_path.write_text("{}\n")
-    return {}
-
-
 class RunScenarioTests(unittest.TestCase):
     def make_scenario(self) -> Scenario:
         return Scenario(
@@ -105,7 +94,6 @@ class RunScenarioTests(unittest.TestCase):
         stack.enter_context(patch.object(bench_run, "load_sql_for_query", Mock(return_value="SELECT 1")))
         stack.enter_context(patch.object(bench_run, "build_statement", Mock(side_effect=lambda _dataset, sql: sql)))
         stack.enter_context(patch.object(bench_run, "write_summary_csv", Mock(side_effect=write_summary_csv_stub)))
-        stack.enter_context(patch.object(bench_run, "write_public_reports", Mock(side_effect=write_public_reports_stub)))
         run_one_mock = Mock(side_effect=run_one_side_effect)
         stack.enter_context(patch.object(bench_run, "run_one", run_one_mock))
         return run_one_mock
@@ -227,7 +215,7 @@ class RunScenarioTests(unittest.TestCase):
             self.assertEqual(run_context["termination"]["phase"], "warmup")
             self.assertEqual(run_context["termination"]["category"], "error")
             self.assertTrue((run_dir / "summary.csv").is_file())
-            self.assertTrue((run_dir / "public_report.md").is_file())
+            self.assertTrue((run_dir / "run.json").is_file())
 
     def test_measured_non_timeout_error_still_exits_non_zero(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
