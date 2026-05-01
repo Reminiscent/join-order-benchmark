@@ -93,7 +93,7 @@ python3 bench/bench.py list variants
 ## 5. Main Run
 
 `main` is the primary public validation path for a new join-order algorithm.  It
-runs the full `job` and `job_complex` workloads.
+runs the complete `job` and `job_complex` workloads.
 
 Prepare:
 
@@ -211,15 +211,26 @@ To re-render the default public report:
 python3 tools/render_public_reports.py outputs/<run_id>
 ```
 
-## 10. Session-Level vs Cluster-Level Settings
+## 10. Run Protocol And PostgreSQL Settings
 
-The harness applies and records session-level benchmark settings, such as:
+Public run settings are split into two groups:
+
+- run protocol settings, such as repetitions, warmup, timeout handling, and
+  variant rotation
+- PostgreSQL settings, such as session GUCs and restart-required cluster
+  settings
+
+The harness applies the following session-level PostgreSQL settings and records
+them in `run.json`, either as protocol fields or as session GUCs:
 
 - `statement_timeout`
 - `join_collapse_limit`
 - `max_parallel_workers_per_gather`
 - `work_mem`
 - `effective_cache_size`
+
+`statement_timeout` is implemented as a session GUC, but it is also part of the
+run protocol because it determines timeout rows in `raw.csv` and `summary.csv`.
 
 The harness does not modify cluster-level settings such as:
 
@@ -236,6 +247,9 @@ ALTER SYSTEM SET shared_buffers = '4GB';
 The memory-related session settings `work_mem=1GB` and
 `effective_cache_size=8GB` are applied by the harness.  `effective_cache_size`
 is a planner costing assumption, not memory allocated by PostgreSQL.
+
+The same split is summarized in [README.md](README.md), and the memory-setting
+rationale is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
 
 ## 11. Useful Overrides
 

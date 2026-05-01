@@ -22,44 +22,58 @@ documents how those tables were produced.
 | Which broader workloads are included? | `extended` adds small-data planning/search-space stress workloads; `full` adds the heavier CEB IMDB 3k subset.  See [SCENARIOS.md](SCENARIOS.md) and [DATASETS.md](DATASETS.md). |
 | Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an explicit `--variants` list and variants file. |
 | How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) maps the public commands to the runner steps: prepare data, stabilize tables, warm up, measure, and write artifacts. |
-| What benchmark parameters were used? | Most PostgreSQL settings remain whatever the server was started with.  The public settings that matter for review are listed below; exact resolved run values are in `run.json`. |
+| What run settings were used? | The public run protocol and PostgreSQL settings are listed below.  `run.json` records the exact scenario, variants, dataset filters, repetition count, timeout, warmup policy, and session GUCs used by a run. |
 | How were timings collected? | PostgreSQL `EXPLAIN ANALYZE` JSON output is used to separate planning and execution time.  `TIMING OFF` reduces node-level timing overhead; caveats are in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md). |
 
 The primary execution metric is `execution_ms_median`.  Planning time is a
 separate diagnostic metric, so planner overhead does not get mixed into
 execution behavior.
 
-## Benchmark Defaults
+## Public Run Settings
 
-This section lists the settings that matter most when interpreting published
-results.  The public defaults are chosen so the benchmark can run on a machine
-with at least 16 GiB of RAM without tuning memory values per machine.  The
-harness applies session-level settings, but restart-required settings must be
-configured before running benchmarks.
+There are two kinds of settings:
 
-| Setting | Default | Purpose |
+- **Run protocol settings** are benchmark-harness behavior: how many repetitions
+  are measured, how warmup works, how timeouts are recorded, and how variants
+  are ordered.
+- **PostgreSQL settings** are GUCs or server settings that affect planning and
+  execution.  Session-level GUCs are applied by the harness; restart-required
+  settings must be configured before the run.
+
+### Run Protocol
+
+| Setting | Public default | Purpose |
 | --- | --- | --- |
-| `shared_buffers` | `4GB` | cluster-level buffer pool baseline, about 25% of the 16 GiB minimum; set before the run and restart PostgreSQL |
 | measured repetitions | `3` | compute per-query medians without making public runs too long |
 | statement timeout | `600000 ms` | bound pathological plans and record them as timeouts |
 | warmup | `1` discarded warmup pass per query group | reduce first-run effects before recorded repetitions |
 | stabilization | `vacuum_freeze_analyze` | run `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT` before measurement |
 | variant order | `rotate` | avoid always giving the same variant the same position in a query group |
-| `join_collapse_limit` | `100` | allow the join-order algorithm under test to see wide join search spaces |
-| `max_parallel_workers_per_gather` | `0` | reduce execution-time noise from parallel workers |
-| `work_mem` | `1GB` | reduce spill noise for single-query serial benchmark runs |
-| `effective_cache_size` | `8GB` | keep planner cache-size assumptions stable for the 16 GiB baseline |
 
-`shared_buffers` is not changed by the harness.  If following the public setup,
-apply it outside the run and restart PostgreSQL:
+### PostgreSQL Settings
+
+The public defaults are chosen so the benchmark can run on a machine with at
+least 16 GiB of RAM without tuning memory values per machine.
+
+| Setting | Public default | Applied by | Purpose |
+| --- | --- | --- | --- |
+| `shared_buffers` | `4GB` | user before run, requires restart | cluster-level buffer pool baseline, about 25% of the 16 GiB minimum |
+| `join_collapse_limit` | `100` | harness session GUC | allow the join-order algorithm under test to see wide join search spaces |
+| `max_parallel_workers_per_gather` | `0` | harness session GUC | reduce execution-time noise from parallel workers |
+| `work_mem` | `1GB` | harness session GUC | reduce spill noise for single-query serial benchmark runs |
+| `effective_cache_size` | `8GB` | harness session GUC | keep planner cache-size assumptions stable for the 16 GiB baseline |
+
+If following the public setup, set `shared_buffers` outside the harness and
+restart PostgreSQL:
 
 ```sql
 ALTER SYSTEM SET shared_buffers = '4GB';
 ```
 
-The other settings above are applied as session settings by the harness and are
-recorded in `run.json`.  See [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the
-memory-setting rationale and caveats.
+The session GUCs are applied by the harness for every warmup and measured
+execution and are recorded in `run.json`.  See
+[BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the memory-setting rationale and
+caveats.
 
 ## Minimal Reproduction
 
@@ -93,6 +107,26 @@ Each `run` creates `outputs/<run_id>/` with `run.json`, `raw.csv`,
 tables can be rendered from `summary.csv` with
 [tools/render_review_tables.py](tools/render_review_tables.py).  The full
 artifact layout and table format are documented in [OUTPUTS.md](OUTPUTS.md).
+
+## Repository Layout
+
+Top-level folders are split by responsibility:
+
+| Path | Purpose |
+| --- | --- |
+| `bench/` | benchmark CLI and harness modules for prepare, run, timing collection, and result summarization |
+| `config/` | built-in scenario definitions |
+| `examples/` | default and example variant definitions, including portable `dp` and `geqo` baselines |
+| `meta/` | generated query manifest used for dataset metadata such as join size and query count |
+| `tools/` | helper scripts for refreshing metadata and rendering reviewer-facing reports or tables |
+| `tests/` | unit tests for scenario parsing, run behavior, and reviewer table rendering |
+| `join-order-benchmark/` | local JOB workload adaptation |
+| `JOB-Complex/` | local JOB-Complex workload adaptation |
+| `imdb_pg_dataset/` | IMDB-backed schema, load scripts, and CEB IMDB 3k query subset |
+| `sqlite/` | local SQLite select5-derived workload adaptation |
+| `postgres-gpuqo/` | local GPUQO-derived synthetic workload adaptations |
+| `data/` | ignored local input data directory, commonly used for the external IMDB CSV bundle |
+| `outputs/` | ignored local benchmark output directory |
 
 ## More Detail
 

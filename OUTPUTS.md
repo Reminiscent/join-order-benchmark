@@ -80,7 +80,7 @@ Important fields:
 | `protocol.skip_measured_after_warmup_timeout` | Whether measured repetitions are skipped after a warmup timeout for the same `(dataset, query, variant)`. |
 | `protocol.warmup_scope` | Current warmup scope; normally `query_group_discarded_pass`. |
 | `protocol.measurement_lane` | The PostgreSQL measurement command shape, currently `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`. |
-| `protocol.session_gucs` | Scenario-level session settings applied before variant settings. |
+| `protocol.session_gucs` | Scenario-level session GUCs applied before variant settings. |
 | `variants` | Resolved variant names, labels, and session GUCs used in this run. |
 | `datasets` | Resolved dataset entries and the variants actually run for each entry. |
 | `tag` | Optional user-provided build or patch label. |
@@ -88,8 +88,11 @@ Important fields:
 | `termination` | Fatal termination record, if the run stopped early. |
 | `progress` | Resume state and whether the run completed. |
 
-Use `run.json` when a reviewer needs to check which scenario, variants, GUCs,
-timeouts, warmup settings, and dataset filters produced a result table.
+Use `run.json` when a reviewer needs to check which scenario, variants, session
+GUCs, timeouts, warmup settings, and dataset filters produced a result table.
+Restart-required cluster settings, such as `shared_buffers`, are not changed by
+the harness and should be recorded with the published result set when they
+matter for review.
 
 ## `raw.csv`
 

@@ -83,7 +83,7 @@ variants = ["dp"]
 max_join = 12
 ```
 
-This means selected non-`dp` variants run the full clique workload, while `dp`
+This means selected non-`dp` variants run the complete clique workload, while `dp`
 runs only clique queries with `join_size <= 12`.  That guard keeps the dynamic
 programming baseline tractable on the dense clique workload.
 

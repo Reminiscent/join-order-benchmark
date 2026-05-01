@@ -61,9 +61,9 @@ That lower bound leaves room for a 4 GiB PostgreSQL buffer pool, operating-syste
 page cache, backend memory, and occasional large hash/sort operations while
 keeping the setup accessible.
 
-Most controls are session-level and are applied by the harness, but
-`shared_buffers` is a cluster-level PostgreSQL setting and must be configured
-before the benchmark:
+Most PostgreSQL settings used by the harness are session-level GUCs, but
+`shared_buffers` is a cluster-level setting and must be configured before the
+benchmark:
 
 ```sql
 ALTER SYSTEM SET shared_buffers = '4GB';
