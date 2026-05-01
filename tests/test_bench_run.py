@@ -282,7 +282,8 @@ class RunScenarioTests(unittest.TestCase):
                     for row in raw_rows
                 )
             )
-            self.assertEqual(run_context["protocol"]["warmup_timeout_policy"], "skip_later_measured_repetitions")
+            self.assertEqual(run_context["statement_timeout_ms"], 1000)
+            self.assertNotIn("protocol", run_context)
 
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")

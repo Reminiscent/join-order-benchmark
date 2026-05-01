@@ -53,6 +53,24 @@ The runner checkpoints progress after complete warmup groups and complete
 measured groups, so `--resume-run-id` resumes from a safe group boundary rather
 than from the middle of a query's variant set.
 
+## Public Run Protocol
+
+The public benchmark protocol is fixed by the selected scenario and runner.
+These details describe how the test is done; they are not ordinary command-line
+parameters:
+
+- 3 measured repetitions are collected for each selected query and variant.
+- 1 warmup pass is run for each query group before measured repetitions.
+- Each prepared database is stabilized with `VACUUM FREEZE ANALYZE` and a
+  best-effort `CHECKPOINT` before measurement.
+- Variant order is rotated across query groups and repetitions.
+- If a warmup execution hits `statement_timeout`, later measured repetitions
+  for the same `(dataset, query, variant)` are recorded as skipped timeout rows
+  instead of re-running the same timeout-prone statement.
+
+`statement_timeout` is the only public run-protocol value exposed as a CLI
+override.  It is a guardrail for very bad plans, not an algorithm setting.
+
 ## Cluster Memory Baseline
 
 The public runs are designed to work on a modest benchmark machine rather than

@@ -3,8 +3,8 @@
 This document describes the public reproduction flow for this benchmark
 repository.
 
-For the runner internals behind these commands, including stabilization,
-warmup, variant rotation, and timing collection, see
+This is a command-oriented guide.  For how the runner performs stabilization,
+warmup, variant rotation, timeout handling, and timing collection, see
 [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
 
 ## 1. Requirements
@@ -169,92 +169,18 @@ styled XLSX workbook and CSV companion files.
 Default table export:
 
 ```bash
-python3 tools/render_review_tables.py outputs/<run_id> \
-  --dataset job \
-  --variants dp,geqo,my_algo
+python3 tools/render_review_tables.py outputs/<run_id>
 ```
 
-The workbook contains one execution-time sheet and one planning-time sheet.
+The command renders the datasets and variants recorded in `run.json`.  Each
+workbook contains one execution-time sheet and one planning-time sheet.
 Execution time is the primary result; planning time is reported separately as a
 diagnostic.
 
 The exact workbook layout, CSV headers, `SUM` row semantics, and ratio color
 rules are documented in [OUTPUTS.md](OUTPUTS.md).
 
-## 9. Measurement Semantics
-
-Current fixed measurement protocol:
-
-- planning and execution metrics come from
-  `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`
-- `bench.py run` performs one discarded warmup pass per query group by default
-  before measured repetitions for that same query group
-- warmup executions are not recorded in `raw.csv` or `summary.csv`
-- measured `statement_timeout` rows are recorded as `status=timeout`
-- non-timeout errors are recorded as `status=error`
-
-The reason for using `EXPLAIN ANALYZE` JSON, and the tradeoff around
-`TIMING OFF`, are documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
-
-Recommended result columns:
-
-- `execution_ms_median`
-  Primary execution comparison column for public ratio tables.
-- `total_ms_median`
-  Typical directly observed planning-plus-execution time for a successful
-  measured repetition.
-- `planning_ms_median`
-  Planner overhead, reported separately from execution.
-- `plan_total_cost_median`
-  Planner-side diagnostic signal, not a runtime substitute.
-
-## 10. Fixed Run Protocol And PostgreSQL Settings
-
-The selected scenario fixes the public benchmark protocol.  These values are
-part of how the test is done; they are not ordinary CLI parameters:
-
-- `3` measured repetitions per query and variant
-- one discarded warmup pass per query group
-- `vacuum_freeze_analyze` stabilization before measurement
-- rotated variant order across query groups and repetitions
-- skipped measured rows after a warmup `statement_timeout` for the same
-  `(dataset, query, variant)`
-
-PostgreSQL settings are split into session-level GUCs and restart-required
-cluster settings.
-
-The harness applies the following session-level PostgreSQL settings and records
-them in `run.json`, either as protocol fields or as session GUCs:
-
-- `statement_timeout`
-- `join_collapse_limit`
-- `max_parallel_workers_per_gather`
-- `work_mem`
-- `effective_cache_size`
-
-`statement_timeout` is implemented as a session GUC, but it is also part of the
-run protocol because it determines timeout rows in `raw.csv` and `summary.csv`.
-
-The harness does not modify cluster-level settings such as:
-
-- `shared_buffers`
-- other restart-required PostgreSQL settings
-
-For the public setup, set `shared_buffers` before the benchmark and restart
-PostgreSQL:
-
-```sql
-ALTER SYSTEM SET shared_buffers = '4GB';
-```
-
-The memory-related session settings `work_mem=1GB` and
-`effective_cache_size=8GB` are applied by the harness.  `effective_cache_size`
-is a planner costing assumption, not memory allocated by PostgreSQL.
-
-The same split is summarized in [README.md](README.md), and the memory-setting
-rationale is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
-
-## 11. CLI Options
+## 9. CLI Options
 
 These are the supported `run` options after choosing a scenario.  They select
 what to compare, where to resume, and how to label the local run.  They do not

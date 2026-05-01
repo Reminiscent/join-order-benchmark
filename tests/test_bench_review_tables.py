@@ -52,8 +52,7 @@ class BenchReviewTablesTests(unittest.TestCase):
 
             paths = write_review_tables(
                 run_dir=run_dir,
-                datasets=["job"],
-                variants_csv="dp,my_algo",
+                datasets=[],
             )
 
             self.assertEqual(len(paths), 3)

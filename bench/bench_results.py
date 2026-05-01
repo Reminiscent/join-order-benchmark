@@ -127,10 +127,7 @@ def build_run_context(
     run_id: str,
     scenario: Any,
     tag: str,
-    reps: int,
     statement_timeout_ms: int,
-    stabilize: str,
-    warmup_runs: int,
     effective_variant_contexts: list[dict[str, Any]],
     query_counts: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -138,16 +135,7 @@ def build_run_context(
         "run_id": run_id,
         "scenario": scenario.name,
         "scenario_description": getattr(scenario, "description", ""),
-        "protocol": {
-            "reps": reps,
-            "statement_timeout_ms": statement_timeout_ms,
-            "stabilize": stabilize,
-            "warmup_runs": warmup_runs,
-            "warmup_timeout_policy": "skip_later_measured_repetitions",
-            "warmup_scope": "query_group_discarded_pass",
-            "measurement_lane": "EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)",
-            "session_gucs": [{k: v} for k, v in scenario.session_gucs],
-        },
+        "statement_timeout_ms": statement_timeout_ms,
         "variants": effective_variant_contexts,
         "datasets": [
             {

@@ -194,10 +194,7 @@ def validate_resume_context(
     *,
     scenario: Scenario,
     tag: str,
-    reps: int,
     statement_timeout_ms: int,
-    stabilize: str,
-    warmup_runs: int,
     variant_names: tuple[str, ...],
     resolved_runs: list[ResolvedDatasetRun],
 ) -> None:
@@ -207,20 +204,14 @@ def validate_resume_context(
     if (run_context.get("tag") or "") != tag:
         die(f"resume run_id has tag '{run_context.get('tag', '')}', expected '{tag}'")
 
-    protocol = run_context.get("protocol", {})
-    expected_protocol = {
-        "reps": reps,
-        "statement_timeout_ms": statement_timeout_ms,
-        "stabilize": stabilize,
-        "warmup_runs": warmup_runs,
-        "warmup_timeout_policy": "skip_later_measured_repetitions",
-    }
-    for key, expected in expected_protocol.items():
-        if protocol.get(key) != expected:
-            die(
-                f"resume run_id protocol mismatch for '{key}': "
-                f"existing={protocol.get(key)!r}, expected={expected!r}"
-            )
+    existing_timeout = run_context.get("statement_timeout_ms")
+    if existing_timeout is None:
+        existing_timeout = run_context.get("protocol", {}).get("statement_timeout_ms")
+    if existing_timeout != statement_timeout_ms:
+        die(
+            "resume run_id statement_timeout_ms mismatch: "
+            f"existing={existing_timeout!r}, expected={statement_timeout_ms!r}"
+        )
 
     existing_variants = tuple(str(item.get("name")) for item in run_context.get("variants", []))
     if existing_variants != variant_names:
@@ -244,10 +235,7 @@ def flush_outputs(
     raw_rows: list[dict[str, str]],
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]],
     tag: str,
-    reps: int,
     statement_timeout_ms: int,
-    stabilize: str,
-    warmup_runs: int,
     effective_variant_contexts: list[dict[str, Any]],
     query_counts: list[dict[str, Any]],
     warmup_failures: list[dict[str, Any]],
@@ -272,10 +260,7 @@ def flush_outputs(
         run_id=run_id,
         scenario=scenario,
         tag=tag,
-        reps=reps,
         statement_timeout_ms=statement_timeout_ms,
-        stabilize=stabilize,
-        warmup_runs=warmup_runs,
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
     )
@@ -398,10 +383,7 @@ def run_scenario(
             run_context,
             scenario=scenario,
             tag=tag,
-            reps=reps,
             statement_timeout_ms=statement_timeout_ms,
-            stabilize=stabilize,
-            warmup_runs=warmup_runs,
             variant_names=variant_names,
             resolved_runs=resolved_runs,
         )
@@ -432,10 +414,7 @@ def run_scenario(
         raw_rows=raw_rows,
         summary_acc=summary_acc,
         tag=tag,
-        reps=reps,
         statement_timeout_ms=statement_timeout_ms,
-        stabilize=stabilize,
-        warmup_runs=warmup_runs,
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
         warmup_failures=warmup_failures,
@@ -519,10 +498,7 @@ def run_scenario(
                     raw_rows=raw_rows,
                     summary_acc=summary_acc,
                     tag=tag,
-                    reps=reps,
                     statement_timeout_ms=statement_timeout_ms,
-                    stabilize=stabilize,
-                    warmup_runs=warmup_runs,
                     effective_variant_contexts=effective_variant_contexts,
                     query_counts=query_counts,
                     warmup_failures=warmup_failures,
@@ -624,10 +600,7 @@ def run_scenario(
                     raw_rows=raw_rows,
                     summary_acc=summary_acc,
                     tag=tag,
-                    reps=reps,
                     statement_timeout_ms=statement_timeout_ms,
-                    stabilize=stabilize,
-                    warmup_runs=warmup_runs,
                     effective_variant_contexts=effective_variant_contexts,
                     query_counts=query_counts,
                     warmup_failures=warmup_failures,
@@ -644,10 +617,7 @@ def run_scenario(
         raw_rows=raw_rows,
         summary_acc=summary_acc,
         tag=tag,
-        reps=reps,
         statement_timeout_ms=statement_timeout_ms,
-        stabilize=stabilize,
-        warmup_runs=warmup_runs,
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
         warmup_failures=warmup_failures,

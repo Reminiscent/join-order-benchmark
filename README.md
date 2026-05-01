@@ -21,44 +21,20 @@ documents how those tables were produced.
 | What was tested first? | `main` is the primary validation scenario.  It runs the complete JOB and JOB-Complex workloads. |
 | Which broader workloads are included? | `extended` adds small-data planning/search-space stress workloads; `full` adds the heavier CEB IMDB 3k subset.  See [SCENARIOS.md](SCENARIOS.md) and [DATASETS.md](DATASETS.md). |
 | Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an optional `--variants-file` and explicit `--variants` list. |
-| How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) maps the public commands to the runner steps: prepare data, stabilize tables, warm up, measure, and write artifacts. |
-| How exactly was it tested? | The fixed public run protocol and PostgreSQL settings are summarized below.  `run.json` records the exact scenario, variants, built-in dataset restrictions, repetition count, timeout, warmup policy, and session GUCs used by a run. |
+| How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) describes the fixed public run protocol: prepare data, stabilize tables, warm up, measure, handle timeouts, and write artifacts. |
+| How can I reproduce it? | [REPRODUCE.md](REPRODUCE.md) is the command-oriented reproduction guide. |
 | How were timings collected? | PostgreSQL `EXPLAIN ANALYZE` JSON output is used to separate planning and execution time.  Measurement caveats are in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md). |
 
 The primary execution metric is `execution_ms_median`.  Planning time is a
 separate diagnostic metric, so planner overhead does not get mixed into
 execution behavior.
 
-## Public Test Protocol
+## PostgreSQL Setup
 
-This section summarizes how the public benchmark is run.  Most values here are
-fixed by the built-in scenario and runner rather than exposed as command-line
-parameters.  The main user choices are the scenario, the variants, and the
-optional `statement_timeout` guardrail.
-
-There are two parts:
-
-- **Run protocol** is benchmark-harness behavior: how many repetitions
-  are measured, how warmup works, how timeouts are recorded, and how variants
-  are ordered.
-- **PostgreSQL settings** are GUCs or server settings that affect planning and
-  execution.  Session-level GUCs are applied by the harness; restart-required
-  settings must be configured before the run.
-
-### Fixed Run Protocol
-
-| Behavior | Public value | Purpose |
-| --- | --- | --- |
-| measured repetitions | `3` | compute per-query medians without making public runs too long |
-| warmup | `1` discarded warmup pass per query group | reduce first-run effects before recorded repetitions |
-| stabilization | `vacuum_freeze_analyze` | run `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT` before measurement |
-| variant order | `rotate` | avoid always giving the same variant the same position in a query group |
-| warmup timeout handling | skip later measured repetitions for the same `(dataset, query, variant)` | avoid re-running a query/variant that already hit the guardrail during warmup |
-
-### PostgreSQL Settings
-
-The public defaults are chosen so the benchmark can run on a machine with at
-least 16 GiB of RAM without tuning memory values per machine.
+The concrete run sequence is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
+The PostgreSQL settings most relevant to review are listed below.  The public
+defaults are chosen so the benchmark can run on a machine with at least 16 GiB
+of RAM without tuning memory values per machine.
 
 | Setting | Public default | Applied by | Purpose |
 | --- | --- | --- | --- |
@@ -77,13 +53,12 @@ ALTER SYSTEM SET shared_buffers = '4GB';
 ```
 
 The session GUCs are applied by the harness for every warmup and measured
-execution and are recorded in `run.json`.  See
-[BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the memory-setting rationale and
-caveats.
+execution.  See [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the run protocol,
+memory-setting rationale, and measurement caveats.
 
 `statement_timeout` is a guardrail rather than a join-order algorithm setting.
 If it is changed for a slower or faster machine, publish the value together with
-the result tables; the resolved value is also recorded in `run.json`.
+the result tables; the resolved value is recorded in `run.json`.
 
 ## Minimal Reproduction
 
@@ -139,8 +114,8 @@ Top-level folders are split by responsibility:
 
 ## More Detail
 
-- [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md): how the benchmark scripts execute a run
-- [REPRODUCE.md](REPRODUCE.md): full reproduction workflow and CLI options
+- [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md): fixed run protocol and timing semantics
+- [REPRODUCE.md](REPRODUCE.md): command-oriented reproduction workflow
 - [SCENARIOS.md](SCENARIOS.md): scenario layers
 - [DATASETS.md](DATASETS.md): workload coverage, IMDB CSV setup, and query counts
 - [OUTPUTS.md](OUTPUTS.md): run artifacts and reviewer tables

@@ -21,8 +21,6 @@ def parse_args() -> argparse.Namespace:
         )
     )
     ap.add_argument("run_dir", help="Path to outputs/<run_id>/")
-    ap.add_argument("--dataset", action="append", default=[], help="dataset to render; repeat for multiple datasets")
-    ap.add_argument("--variants", default=None, help="comma-separated variants and display order")
     return ap.parse_args()
 
 
@@ -30,8 +28,8 @@ def main() -> None:
     args = parse_args()
     paths = write_review_tables(
         run_dir=Path(args.run_dir).resolve(),
-        datasets=args.dataset,
-        variants_csv=args.variants,
+        datasets=[],
+        variants_csv=None,
     )
     for path in paths:
         print(path)
