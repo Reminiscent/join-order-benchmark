@@ -24,7 +24,7 @@ documents how those tables were produced.
 | What benchmark parameters were used? | The public run defaults are listed below.  The exact resolved values for a submitted run are in its `run.json`. |
 | How were timings collected? | The measurement protocol below uses PostgreSQL `EXPLAIN ANALYZE` JSON output with planning and execution reported separately. |
 | How were the uploaded tables produced? | [tools/render_review_tables.py](tools/render_review_tables.py) renders styled Excel workbooks with execution-time and planning-time sheets from `summary.csv`. |
-| Where are the results? | Results are expected to be uploaded separately, for example as Excel/PDF tables.  If exact tracing is needed, inspect the uploaded `run.json` and `raw.csv` from the same run. |
+| Where are the results? | Results are expected to be uploaded separately, for example as Excel/PDF tables.  [OUTPUTS.md](OUTPUTS.md) describes every generated artifact and reviewer-table format. |
 
 The primary execution metric is `execution_ms_median`.  Planning time is a
 separate diagnostic metric, so planner overhead does not get mixed into
@@ -149,11 +149,12 @@ Each `run` creates `outputs/<run_id>/` with `run.json`, `raw.csv`,
 `summary.csv`, and rendered public-report files.  Keep `run.json` with the
 published result set when exact scenario, parameter, and variant resolution
 needs to be checked; use `raw.csv` when per-query measurements need to be
-audited.  The full layout is documented in [REPRODUCE.md](REPRODUCE.md).
+audited.  The full layout is documented in [OUTPUTS.md](OUTPUTS.md).
 
 ## More Detail
 
 - [REPRODUCE.md](REPRODUCE.md): full reproduction workflow and CLI overrides
 - [SCENARIOS.md](SCENARIOS.md): scenario layers
 - [DATASETS.md](DATASETS.md): workload coverage, IMDB CSV setup, and query counts
+- [OUTPUTS.md](OUTPUTS.md): run artifacts, public reports, and reviewer tables
 - [config/README.md](config/README.md): scenario and variant file fields

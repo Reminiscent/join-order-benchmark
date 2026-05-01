@@ -139,7 +139,7 @@ full dataset while limiting `dp` to `join_size <= 12`.
 
 ## 7. Output Layout
 
-Every `run` creates:
+Every `run` creates local artifacts under `outputs/<run_id>/`:
 
 ```text
 outputs/<run_id>/
@@ -150,37 +150,8 @@ outputs/<run_id>/
   public_report.json
 ```
 
-`run.json`
-
-- minimal run context needed to explain the benchmark protocol and re-render the
-  public report
-- includes scenario name, protocol settings, resolved variants, resolved
-  datasets, optional `tag`, warmup failures, and progress state
-- intentionally does not snapshot host metadata, PostgreSQL version,
-  cluster-level settings, or git state
-
-`raw.csv`
-
-- source-of-truth measurement log
-- one row per `(dataset, query, variant, rep)`
-- includes status, error details, phase timings, planner cost, and variant
-  rotation position
-
-`summary.csv`
-
-- aggregated reporting view derived from `raw.csv`
-- one row per `(dataset, query, variant)`
-- aggregates successful measured repetitions only and carries `ok_reps` /
-  `err_reps`
-
-`public_report.md`
-
-- auto-generated after every `run`
-- public markdown report with separate execution and planning sections
-
-`public_report.json`
-
-- machine-readable form of the same public report
+The detailed artifact contract, column meanings, console output, public-report
+format, and reviewer-table examples are documented in [OUTPUTS.md](OUTPUTS.md).
 
 ## 8. Reviewer Tables
 
@@ -200,22 +171,8 @@ The workbook contains one execution-time sheet and one planning-time sheet.
 Execution time is the primary result; planning time is reported separately as a
 diagnostic.
 
-The workbook separates metric values from ratio columns, colors ratio cells
-relative to `dp`, and includes a `SUM` row.  Per-query ratios are direct
-`variant/dp` ratios to match spreadsheet-style reports.
-
-Workbook formatting rules:
-
-- one sheet for execution time and one sheet for planning time
-- first columns: query id and join size
-- middle column group: per-variant median metric values in milliseconds
-- last column group: each non-`dp` variant divided by `dp`
-- `SUM` row: sums metric values over comparable rows, then computes the total
-  ratio
-- green ratio cells: faster than `dp` (`< 0.95`)
-- white ratio cells: roughly equivalent (`0.95` through `1.05`)
-- yellow/orange/red ratio cells: slower than `dp` (`> 1.05`, with darker colors
-  for larger slowdowns)
+The exact workbook layout, CSV headers, `SUM` row semantics, and ratio color
+rules are documented in [OUTPUTS.md](OUTPUTS.md).
 
 ## 9. Measurement Semantics
 
