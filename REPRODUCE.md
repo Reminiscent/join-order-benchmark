@@ -25,21 +25,28 @@ Following the public `shared_buffers=4GB` setup also requires either superuser
 access for `ALTER SYSTEM` or direct access to the PostgreSQL server
 configuration, followed by a server restart.
 
-If you use a custom PostgreSQL build, expose its binaries first:
+`prepare` and `run` both connect to PostgreSQL.  The harness does not define
+its own connection defaults: `--host`, `--port`, and `--user` are optional
+pass-through flags to `psql`.  If they are omitted, they are not passed.
 
-```bash
-export PATH="$PG_BUILD_DIR/bin:$PATH"
-```
+Use the same connection flags for both phases when the server is not reachable
+through the native PostgreSQL defaults:
 
-Optional connection flags supported by every command:
+| Flag | If omitted |
+| --- | --- |
+| `--host` | libpq uses its normal local connection behavior, usually a Unix-domain socket on Unix-like systems |
+| `--port` | libpq uses PostgreSQL's default port, usually `5432`, unless overridden by the environment |
+| `--user` | libpq uses the current operating-system user, unless `PGUSER` is set |
 
-- `--host`
-- `--port` (default: `5432`)
-- `--user`
+This matches a direct local PostgreSQL source build started with default
+connection settings.  If your server listens on TCP, a non-default port, or a
+different database role, pass the corresponding values explicitly.
 
-When `--host` is omitted, `psql` uses its normal local connection behavior.  The
-harness passes `--port 5432` by default; use `--port` only when the server is
-listening elsewhere.
+If you prefer one shared connection configuration, use libpq's native
+environment variables or service files, for example `PGHOST`, `PGPORT`,
+`PGUSER`, `PGPASSWORD`, `PGSSLMODE`, or `PGSERVICE`.  The harness still owns the
+database name because it switches between the `postgres` maintenance database
+and the benchmark databases during prepare and run.
 
 ## 2. Variants
 
@@ -56,12 +63,6 @@ Inspect built-ins plus extra example variants:
 
 ```bash
 python3 bench/bench.py list variants --variants-file examples/variants.toml
-```
-
-Use an extra variant file when testing a different algorithm or parameter set:
-
-```bash
-python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
 ```
 
 If `--variants` is omitted, the selected scenario uses the built-in `dp` and
@@ -119,7 +120,9 @@ python3 bench/bench.py run main --variants dp,geqo
 Run with an extra variant set:
 
 ```bash
-python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
+python3 bench/bench.py run main \
+  --variants-file path/to/variants.toml \
+  --variants dp,geqo,my_algo
 ```
 
 ## 6. Extended And Full Runs
@@ -176,8 +179,9 @@ Default table export:
 python3 tools/render_review_tables.py outputs/<run_id>
 ```
 
-The command renders the datasets and variants recorded in `run.json`.  Each
-workbook contains one execution-time sheet and one planning-time sheet.
+The command renders the datasets and variants recorded in `run.json`.  The
+workbook contains one execution-time sheet and one planning-time sheet, with
+`dataset` as the first table column.
 Execution time is the primary result; planning time is reported separately as a
 diagnostic.
 
@@ -199,6 +203,20 @@ guardrail.
 | `--statement-timeout-ms` | adjust the guardrail timeout for very slow or very fast machines |
 | `--tag` | record a local build or patch label in `run.json` |
 | `--fail-on-error` | exit non-zero on non-timeout query errors |
+
+Resume an interrupted run by passing the output directory name:
+
+```bash
+python3 bench/bench.py run main \
+  --variants dp,geqo,my_algo \
+  --variants-file path/to/variants.toml \
+  --resume-run-id 20260412_142110_777847_main
+```
+
+Use the same scenario, variant list, variants file, connection flags, tag, and
+statement timeout as the original run.  The resume id is the directory name
+under `outputs/`.  The harness validates the run context and continues from the
+next unfinished safe group boundary.
 
 `--statement-timeout-ms` is not an algorithm knob.  It only limits how long a
 single bad plan can occupy the run.  If it differs from the default

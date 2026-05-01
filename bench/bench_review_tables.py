@@ -57,6 +57,7 @@ class ReviewTableCell:
 
 @dataclass(frozen=True)
 class ReviewTableRow:
+    dataset: str
     query_id: str
     join_size: int
     values: dict[str, ReviewTableCell]
@@ -68,7 +69,7 @@ class ReviewTableRow:
 class ReviewTable:
     run_id: str
     scenario: str
-    dataset: str
+    datasets: tuple[str, ...]
     metric: str
     metric_column: str
     metric_title: str
@@ -221,10 +222,11 @@ def dedupe_preserve(items: list[str]) -> list[str]:
     return out
 
 
-def resolve_variant_order(
+def resolve_combined_variant_order(
     *,
     run_context: dict[str, Any],
-    dataset_rows: dict[str, dict[str, SummaryRow]],
+    rows_by_dataset: dict[str, dict[str, dict[str, SummaryRow]]],
+    selected_datasets: list[str],
     variants_csv: Optional[str],
 ) -> tuple[str, ...]:
     if variants_csv:
@@ -235,11 +237,21 @@ def resolve_variant_order(
             for entry in run_context.get("variants", [])
             if isinstance(entry, dict) and entry.get("name")
         ]
-        variants = tuple(configured) if configured else tuple(sorted(dataset_rows))
+        if configured:
+            variants = tuple(configured)
+        else:
+            found: list[str] = []
+            for dataset in selected_datasets:
+                found.extend(rows_by_dataset.get(dataset, {}))
+            variants = tuple(sorted(set(found)))
 
-    missing = [variant for variant in variants if variant not in dataset_rows]
+    missing = [
+        variant
+        for variant in variants
+        if not any(variant in rows_by_dataset.get(dataset, {}) for dataset in selected_datasets)
+    ]
     if missing:
-        raise SystemExit(f"dataset does not contain selected variant(s): {', '.join(missing)}")
+        raise SystemExit(f"run summary does not contain selected variant(s): {', '.join(missing)}")
     return variants
 
 
@@ -257,55 +269,70 @@ def build_review_table(
     run_context: dict[str, Any],
     rows_by_dataset: dict[str, dict[str, dict[str, SummaryRow]]],
     query_order: dict[str, list[str]],
-    dataset: str,
+    datasets: list[str],
     metric: str,
     variants_csv: Optional[str],
 ) -> ReviewTable:
-    if dataset not in rows_by_dataset:
-        raise SystemExit(f"run summary does not contain dataset '{dataset}'")
+    missing_datasets = [dataset for dataset in datasets if dataset not in rows_by_dataset]
+    if missing_datasets:
+        raise SystemExit(f"run summary does not contain dataset(s): {', '.join(missing_datasets)}")
     if metric not in METRICS:
         raise SystemExit(f"unknown metric '{metric}'")
 
     metric_column, metric_title = METRICS[metric]
-    dataset_rows = rows_by_dataset[dataset]
-    variants = resolve_variant_order(run_context=run_context, dataset_rows=dataset_rows, variants_csv=variants_csv)
+    variants = resolve_combined_variant_order(
+        run_context=run_context,
+        rows_by_dataset=rows_by_dataset,
+        selected_datasets=datasets,
+        variants_csv=variants_csv,
+    )
     reference = DEFAULT_REFERENCE_VARIANT
     if reference not in variants:
         raise SystemExit(f"reference variant '{reference}' is not in the selected variants")
 
-    query_ids = sorted(query_order[dataset], key=natural_key)
     labels = label_map(run_context, variants)
 
     rows: list[ReviewTableRow] = []
+    previous_dataset = ""
     previous_family = ""
-    for query_id in query_ids:
-        sample = first_row_for_query(dataset_rows, query_id)
-        if sample is None:
-            continue
-        values: dict[str, ReviewTableCell] = {}
-        for variant in variants:
-            value = metric_value(dataset_rows.get(variant, {}).get(query_id), metric_column)
-            values[variant] = ReviewTableCell(text=format_ms(value), raw=value, css_class="numeric" if value is not None else "numeric missing")
-
-        reference_value = values[reference].raw
-        ratios: dict[str, ReviewTableCell] = {}
-        for variant in variants:
-            if variant == reference:
+    for dataset in datasets:
+        dataset_rows = rows_by_dataset[dataset]
+        query_ids = sorted(query_order[dataset], key=natural_key)
+        previous_family = ""
+        for query_id in query_ids:
+            sample = first_row_for_query(dataset_rows, query_id)
+            if sample is None:
                 continue
-            ratio = ratio_to_reference(values[variant].raw, reference_value)
-            ratios[variant] = ReviewTableCell(text=format_ratio(ratio), raw=ratio, css_class=ratio_css_class(ratio))
+            values: dict[str, ReviewTableCell] = {}
+            for variant in variants:
+                value = metric_value(dataset_rows.get(variant, {}).get(query_id), metric_column)
+                css_class = "numeric" if value is not None else "numeric missing"
+                values[variant] = ReviewTableCell(text=format_ms(value), raw=value, css_class=css_class)
 
-        family = query_family(query_id)
-        rows.append(
-            ReviewTableRow(
-                query_id=query_id,
-                join_size=sample.join_size,
-                values=values,
-                ratios=ratios,
-                family_start=bool(previous_family and family != previous_family),
+            reference_value = values[reference].raw
+            ratios: dict[str, ReviewTableCell] = {}
+            for variant in variants:
+                if variant == reference:
+                    continue
+                ratio = ratio_to_reference(values[variant].raw, reference_value)
+                ratios[variant] = ReviewTableCell(text=format_ratio(ratio), raw=ratio, css_class=ratio_css_class(ratio))
+
+            family = query_family(query_id)
+            rows.append(
+                ReviewTableRow(
+                    dataset=dataset,
+                    query_id=query_id,
+                    join_size=sample.join_size,
+                    values=values,
+                    ratios=ratios,
+                    family_start=bool(
+                        (previous_dataset and dataset != previous_dataset)
+                        or (previous_family and family != previous_family)
+                    ),
+                )
             )
-        )
-        previous_family = family
+            previous_dataset = dataset
+            previous_family = family
 
     total_values: dict[str, ReviewTableCell] = {}
     for variant in variants:
@@ -329,7 +356,7 @@ def build_review_table(
     return ReviewTable(
         run_id=str(run_context.get("run_id", "")),
         scenario=str(run_context.get("scenario", "")),
-        dataset=dataset,
+        datasets=tuple(datasets),
         metric=metric,
         metric_column=metric_column,
         metric_title=metric_title,
@@ -347,17 +374,17 @@ def render_review_table_csv(table: ReviewTable) -> str:
 
     out = StringIO()
     writer = csv.writer(out, lineterminator="\n")
-    header = ["query", "join_size"]
+    header = ["dataset", "query", "join_size"]
     header.extend([f"{variant}_{table.metric_column}" for variant in table.variants])
     header.extend([f"{variant}_to_{table.reference}" for variant in table.variants if variant != table.reference])
     writer.writerow(header)
     for row in table.rows:
-        cells: list[str] = [row.query_id, str(row.join_size)]
+        cells: list[str] = [row.dataset, row.query_id, str(row.join_size)]
         cells.extend(cell.text for cell in row.values.values())
         cells.extend(cell.text for cell in row.ratios.values())
         writer.writerow(cells)
 
-    total: list[str] = ["SUM", ""]
+    total: list[str] = ["SUM", "", ""]
     total.extend(cell.text for cell in table.total_values.values())
     total.extend(cell.text for cell in table.total_ratios.values())
     writer.writerow(total)
@@ -423,7 +450,7 @@ def xlsx_row(row_idx: int, cells: list[str]) -> str:
 
 
 def xlsx_sheet_xml(table: ReviewTable) -> str:
-    query_cols = 2
+    query_cols = 3
     value_start = query_cols + 1
     value_end = value_start + len(table.variants) - 1
     ratio_start = value_end + 1
@@ -433,7 +460,7 @@ def xlsx_sheet_xml(table: ReviewTable) -> str:
     rows: list[str] = []
     merges: list[str] = []
 
-    title = f"{table.dataset} {table.metric_title}"
+    title = f"{table.scenario or 'benchmark'} {table.metric_title}"
     rows.append(xlsx_row(1, [xlsx_cell("A1", title, 1)]))
     merges.append(f"A1:{last_col}1")
 
@@ -445,10 +472,12 @@ def xlsx_sheet_xml(table: ReviewTable) -> str:
     merges.append(f"A2:{last_col}2")
 
     row_idx = 4
-    header_cells: list[str] = [xlsx_cell("A4", "query", 3)]
+    header_cells: list[str] = [xlsx_cell("A4", "dataset", 3)]
     merges.append("A4:A5")
-    header_cells.append(xlsx_cell("B4", "joins", 3))
+    header_cells.append(xlsx_cell("B4", "query", 3))
     merges.append("B4:B5")
+    header_cells.append(xlsx_cell("C4", "joins", 3))
+    merges.append("C4:C5")
     header_cells.append(
         xlsx_cell(
             f"{col_name(value_start)}4",
@@ -491,9 +520,10 @@ def xlsx_sheet_xml(table: ReviewTable) -> str:
 
     row_idx = 6
     for table_row in table.rows:
-        cells: list[str] = [xlsx_cell(f"A{row_idx}", table_row.query_id, 6)]
-        cells.append(xlsx_cell(f"B{row_idx}", table_row.join_size, 7, numeric=True))
-        col = 3
+        cells: list[str] = [xlsx_cell(f"A{row_idx}", table_row.dataset, 6)]
+        cells.append(xlsx_cell(f"B{row_idx}", table_row.query_id, 6))
+        cells.append(xlsx_cell(f"C{row_idx}", table_row.join_size, 7, numeric=True))
+        col = 4
         for variant in table.variants:
             cell = table_row.values[variant]
             cells.append(
@@ -553,8 +583,9 @@ def xlsx_sheet_xml(table: ReviewTable) -> str:
         col += 1
     rows.append(xlsx_row(row_idx, total_cells))
 
-    width_entries = ['<col min="1" max="1" width="10" customWidth="1"/>']
-    width_entries.append('<col min="2" max="2" width="8" customWidth="1"/>')
+    width_entries = ['<col min="1" max="1" width="20" customWidth="1"/>']
+    width_entries.append('<col min="2" max="2" width="10" customWidth="1"/>')
+    width_entries.append('<col min="3" max="3" width="8" customWidth="1"/>')
     if value_start <= value_end:
         width_entries.append(f'<col min="{value_start}" max="{value_end}" width="15" customWidth="1"/>')
     if ratio_start <= ratio_end:
@@ -652,7 +683,7 @@ def write_review_workbook(path: Path, tables: list[ReviewTable]) -> None:
         raise SystemExit("cannot write an empty workbook")
 
     used_sheet_names: set[str] = set()
-    sheet_names = [sheet_name(f"{table.dataset} {table.metric}", used_sheet_names) for table in tables]
+    sheet_names = [sheet_name(table.metric, used_sheet_names) for table in tables]
 
     workbook_sheets = "".join(
         f'<sheet name="{xml_attr(name)}" sheetId="{idx}" r:id="rId{idx}"/>'
@@ -711,12 +742,12 @@ def write_review_workbook(path: Path, tables: list[ReviewTable]) -> None:
             zf.writestr(f"xl/worksheets/sheet{idx}.xml", xlsx_sheet_xml(table))
 
 
-def default_output_name(dataset: str) -> str:
-    return safe_artifact_name(f"review_{dataset}")
+def default_output_name() -> str:
+    return safe_artifact_name("review")
 
 
-def default_csv_output_name(dataset: str, metric: str) -> str:
-    return safe_artifact_name(f"review_{dataset}_{metric}")
+def default_csv_output_name(metric: str) -> str:
+    return safe_artifact_name(f"review_{metric}")
 
 
 def write_review_tables(
@@ -747,23 +778,22 @@ def write_review_tables(
     out_dir = run_dir / "review_tables"
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    tables: list[ReviewTable] = []
     written: list[Path] = []
-    for dataset in selected_datasets:
-        tables: list[ReviewTable] = []
-        for metric in DEFAULT_METRICS:
-            table = build_review_table(
-                run_context=run_context,
-                rows_by_dataset=rows_by_dataset,
-                query_order=query_order,
-                dataset=dataset,
-                metric=metric,
-                variants_csv=variants_csv,
-            )
-            tables.append(table)
-            csv_path = out_dir / f"{default_csv_output_name(dataset, metric)}.csv"
-            csv_path.write_text(render_review_table_csv(table))
-            written.append(csv_path)
-        workbook_path = out_dir / f"{default_output_name(dataset)}.xlsx"
-        write_review_workbook(workbook_path, tables)
-        written.insert(len(written) - len(tables), workbook_path)
+    for metric in DEFAULT_METRICS:
+        table = build_review_table(
+            run_context=run_context,
+            rows_by_dataset=rows_by_dataset,
+            query_order=query_order,
+            datasets=selected_datasets,
+            metric=metric,
+            variants_csv=variants_csv,
+        )
+        tables.append(table)
+        csv_path = out_dir / f"{default_csv_output_name(metric)}.csv"
+        csv_path.write_text(render_review_table_csv(table))
+        written.append(csv_path)
+    workbook_path = out_dir / f"{default_output_name()}.xlsx"
+    write_review_workbook(workbook_path, tables)
+    written.insert(0, workbook_path)
     return written

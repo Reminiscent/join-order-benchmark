@@ -147,40 +147,47 @@ Reviewer tables are generated explicitly from an existing run directory:
 python3 tools/render_review_tables.py outputs/<run_id>
 ```
 
-For each dataset recorded in `run.json`, the command writes:
+The command writes one combined workbook and two CSV companions:
 
 ```text
 outputs/<run_id>/review_tables/
-  review_<dataset>.xlsx
-  review_<dataset>_execution.csv
-  review_<dataset>_planning.csv
+  review.xlsx
+  review_execution.csv
+  review_planning.csv
 ```
 
 The XLSX workbook contains two sheets:
 
-- `<dataset> execution`
-- `<dataset> planning`
+- `execution`
+- `planning`
+
+The workbook is the reviewer-facing attachment: it has frozen headers, grouped
+metric and ratio columns, number formats, a `SUM` row, and ratio colors.  The
+CSV files contain the same table values without workbook styling, so they are
+easy to inspect with text tools or import into other analysis scripts.
 
 Reviewer tables require `dp` in the selected variant list.  Ratios are direct
 `variant/dp` ratios.  Execution time is the primary result; planning time is a
-separate diagnostic sheet.
+separate diagnostic sheet.  All datasets recorded in `run.json` are shown in
+one table, with `dataset` as the first column, so the uploaded attachment count
+stays small even for `extended` and `full` runs.
 
 ### Example Table Shape
 
 Suppose `summary.csv` contains these median execution times:
 
-| query | joins | dp | geqo | my_algo |
-| --- | ---: | ---: | ---: | ---: |
-| `2a` | 12 | 200.00 | 260.00 | 150.00 |
-| `10a` | 7 | 100.00 | 110.00 | 80.00 |
+| dataset | query | joins | dp | geqo | my_algo |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `job` | `2a` | 12 | 200.00 | 260.00 | 150.00 |
+| `job` | `10a` | 7 | 100.00 | 110.00 | 80.00 |
 
-The execution sheet in `review_job.xlsx` is shaped like this:
+The execution sheet in `review.xlsx` is shaped like this:
 
-| query | joins | DP | GEQO | My Algorithm | GEQO/DP | My Algorithm/DP |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `2a` | 12 | 200.00 | 260.00 | 150.00 | 1.30 | 0.75 |
-| `10a` | 7 | 100.00 | 110.00 | 80.00 | 1.10 | 0.80 |
-| `SUM` |  | 300.00 | 370.00 | 230.00 | 1.23 | 0.77 |
+| dataset | query | joins | DP | GEQO | My Algorithm | GEQO/DP | My Algorithm/DP |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `job` | `2a` | 12 | 200.00 | 260.00 | 150.00 | 1.30 | 0.75 |
+| `job` | `10a` | 7 | 100.00 | 110.00 | 80.00 | 1.10 | 0.80 |
+| `SUM` |  |  | 300.00 | 370.00 | 230.00 | 1.23 | 0.77 |
 
 The ratio cells are computed as:
 
@@ -194,10 +201,10 @@ My Algorithm/DP SUM = (150.00 + 80.00) / (200.00 + 100.00) = 0.77
 The CSV companion uses the same values without workbook styling:
 
 ```csv
-query,join_size,dp_execution_ms_median,geqo_execution_ms_median,my_algo_execution_ms_median,geqo_to_dp,my_algo_to_dp
-2a,12,200,260,150,1.3,0.75
-10a,7,100,110,80,1.1,0.8
-SUM,,300,370,230,1.23,0.77
+dataset,query,join_size,dp_execution_ms_median,geqo_execution_ms_median,my_algo_execution_ms_median,geqo_to_dp,my_algo_to_dp
+job,2a,12,200,260,150,1.3,0.75
+job,10a,7,100,110,80,1.1,0.8
+SUM,,,300,370,230,1.23,0.77
 ```
 
 The planning CSV and planning sheet use the same layout with

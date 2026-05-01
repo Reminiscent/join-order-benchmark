@@ -17,7 +17,7 @@ def parse_args() -> argparse.Namespace:
     ap = argparse.ArgumentParser(
         description=(
             "Render reviewer-facing per-query benchmark tables from outputs/<run_id>/summary.csv. "
-            "Writes a styled XLSX workbook plus CSV companion files."
+            "Writes one styled XLSX workbook plus CSV companion files."
         )
     )
     ap.add_argument("run_dir", help="Path to outputs/<run_id>/")

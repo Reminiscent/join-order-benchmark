@@ -57,7 +57,9 @@ Run a patch-specific algorithm by passing an extra variants file and an explicit
 variant set:
 
 ```bash
-python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
+python3 bench/bench.py run main \
+  --variants-file path/to/variants.toml \
+  --variants dp,geqo,my_algo
 ```
 
 See [REPRODUCE.md](REPRODUCE.md) for the full command flow, connection flags,

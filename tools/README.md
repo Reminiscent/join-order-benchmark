@@ -18,7 +18,7 @@ query manifest and small helper commands.
 
 `render_review_tables.py`
 
-- renders reviewer-facing XLSX and CSV tables from `outputs/<run_id>/summary.csv`
+- renders one reviewer-facing XLSX workbook and CSV companions from `outputs/<run_id>/summary.csv`
 - reads datasets and variant order from `outputs/<run_id>/run.json`
 
 Schema:

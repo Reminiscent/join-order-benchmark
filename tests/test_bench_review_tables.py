@@ -27,7 +27,7 @@ class BenchReviewTablesTests(unittest.TestCase):
                         {"name": "dp", "label": "Dynamic Programming"},
                         {"name": "my_algo", "label": "My Algorithm"},
                     ],
-                    "datasets": [{"dataset": "job"}],
+                    "datasets": [{"dataset": "job"}, {"dataset": "job_complex"}],
                 }
             )
             + "\n"
@@ -40,6 +40,8 @@ class BenchReviewTablesTests(unittest.TestCase):
                     "job,10a,7,my_algo,1.000,80.000,81.000,900.000,3,0",
                     "job,2a,12,dp,4.000,200.000,204.000,1000.000,3,0",
                     "job,2a,12,my_algo,8.000,500.000,508.000,900.000,3,0",
+                    "job_complex,1a,9,dp,3.000,300.000,303.000,1000.000,3,0",
+                    "job_complex,1a,9,my_algo,6.000,450.000,456.000,900.000,3,0",
                     "",
                 ]
             )
@@ -56,18 +58,20 @@ class BenchReviewTablesTests(unittest.TestCase):
             )
 
             self.assertEqual(len(paths), 3)
-            workbook_path = run_dir / "review_tables" / "review_job.xlsx"
-            execution_csv = (run_dir / "review_tables" / "review_job_execution.csv").read_text()
-            planning_csv = (run_dir / "review_tables" / "review_job_planning.csv").read_text()
+            workbook_path = run_dir / "review_tables" / "review.xlsx"
+            execution_csv = (run_dir / "review_tables" / "review_execution.csv").read_text()
+            planning_csv = (run_dir / "review_tables" / "review_planning.csv").read_text()
             with zipfile.ZipFile(workbook_path) as zf:
                 workbook_xml = zf.read("xl/workbook.xml").decode()
                 styles_xml = zf.read("xl/styles.xml").decode()
 
-        self.assertIn("job execution", workbook_xml)
-        self.assertIn("job planning", workbook_xml)
+        self.assertIn("execution", workbook_xml)
+        self.assertIn("planning", workbook_xml)
         self.assertIn("B7E1CD", styles_xml)
         self.assertIn("F4CCCC", styles_xml)
+        self.assertIn("dataset,query,join_size", execution_csv)
         self.assertIn("2a", execution_csv)
+        self.assertIn("job_complex,1a", execution_csv)
         self.assertLess(execution_csv.index("2a"), execution_csv.index("10a"))
         self.assertIn("SUM", planning_csv)
         self.assertIn("my_algo_to_dp", planning_csv)
