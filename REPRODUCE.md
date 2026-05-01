@@ -223,7 +223,9 @@ python3 bench/bench.py run main \
 Use the same scenario, variant list, variants file, connection flags, tag, and
 statement timeout as the original run.  The resume id is the directory name
 under `outputs/`.  The harness validates the run context and continues from the
-next unfinished safe group boundary.
+next unfinished safe group boundary.  Resume does not re-run database
+stabilization, so it does not intentionally replace the statistics snapshot
+used by earlier completed groups.
 
 `--statement-timeout-ms` is not an algorithm knob.  It only limits how long a
 single bad plan can occupy the run.  If it differs from the default

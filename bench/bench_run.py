@@ -341,7 +341,7 @@ def run_scenario(
     termination: dict[str, Any] | None = None
 
     for spec in resolved_runs:
-        if spec.db not in stabilized_dbs:
+        if resume_run_id is None and spec.db not in stabilized_dbs:
             stabilize_db(spec.db, stabilize, conn)
             stabilized_dbs.add(spec.db)
 

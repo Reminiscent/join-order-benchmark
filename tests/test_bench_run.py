@@ -83,20 +83,21 @@ class RunScenarioTests(unittest.TestCase):
         run_one_side_effect: object,
         *,
         queries: list[QueryMeta] | None = None,
-    ) -> Mock:
+    ) -> tuple[Mock, Mock]:
         stack.enter_context(patch.object(bench_run, "OUTPUTS_DIR", outputs_dir))
         stack.enter_context(patch.object(bench_run, "utc_now", Mock(return_value=FIXED_NOW)))
         stack.enter_context(patch.object(bench_run, "ensure_databases_reachable", Mock()))
         stack.enter_context(patch.object(bench_run, "validate_required_gucs", Mock()))
         stack.enter_context(patch.object(bench_run, "resolved_variant_session_gucs", Mock(return_value=())))
-        stack.enter_context(patch.object(bench_run, "stabilize_db", Mock()))
+        stabilize_mock = Mock()
+        stack.enter_context(patch.object(bench_run, "stabilize_db", stabilize_mock))
         stack.enter_context(patch.object(bench_run, "select_queries", Mock(return_value=queries or [self.make_query()])))
         stack.enter_context(patch.object(bench_run, "load_sql_for_query", Mock(return_value="SELECT 1")))
         stack.enter_context(patch.object(bench_run, "build_statement", Mock(side_effect=lambda _dataset, sql: sql)))
         stack.enter_context(patch.object(bench_run, "write_summary_csv", Mock(side_effect=write_summary_csv_stub)))
         run_one_mock = Mock(side_effect=run_one_side_effect)
         stack.enter_context(patch.object(bench_run, "run_one", run_one_mock))
-        return run_one_mock
+        return run_one_mock, stabilize_mock
 
     def only_run_dir(self, outputs_dir: Path) -> Path:
         run_dirs = [path for path in outputs_dir.iterdir() if path.is_dir()]
@@ -248,7 +249,7 @@ class RunScenarioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
-            run_one_mock = self.patch_run_environment(
+            run_one_mock, _ = self.patch_run_environment(
                 stack,
                 outputs_dir,
                 bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
@@ -293,7 +294,7 @@ class RunScenarioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
-            run_one_mock = self.patch_run_environment(
+            run_one_mock, _ = self.patch_run_environment(
                 stack,
                 outputs_dir,
                 [metrics] * 6,
@@ -339,7 +340,7 @@ class RunScenarioTests(unittest.TestCase):
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
             with ExitStack() as stack:
-                run_one_mock = self.patch_run_environment(
+                run_one_mock, stabilize_mock = self.patch_run_environment(
                     stack,
                     outputs_dir,
                     [
@@ -365,12 +366,13 @@ class RunScenarioTests(unittest.TestCase):
                         fail_on_error=True,
                     )
                 self.assertEqual(run_one_mock.call_count, 2)
+                stabilize_mock.assert_called_once_with("bench_job", "none", None)
 
             run_dir = self.only_run_dir(outputs_dir)
             self.assertEqual([row["query_id"] for row in self.read_raw_rows(run_dir)], ["q1"])
 
             with ExitStack() as stack:
-                run_one_mock = self.patch_run_environment(
+                run_one_mock, stabilize_mock = self.patch_run_environment(
                     stack,
                     outputs_dir,
                     lambda *args, **kwargs: bench_exec.RunMetrics(
@@ -397,6 +399,7 @@ class RunScenarioTests(unittest.TestCase):
                     fail_on_error=True,
                 )
                 self.assertEqual(run_one_mock.call_count, 1)
+                stabilize_mock.assert_not_called()
 
             raw_rows = self.read_raw_rows(run_dir)
             self.assertEqual([row["query_id"] for row in raw_rows], ["q1", "q2"])
@@ -410,7 +413,7 @@ class RunScenarioTests(unittest.TestCase):
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
             with ExitStack() as stack:
-                run_one_mock = self.patch_run_environment(
+                run_one_mock, _ = self.patch_run_environment(
                     stack,
                     outputs_dir,
                     [
@@ -445,7 +448,7 @@ class RunScenarioTests(unittest.TestCase):
             )
 
             with ExitStack() as stack:
-                run_one_mock = self.patch_run_environment(
+                run_one_mock, _ = self.patch_run_environment(
                     stack,
                     outputs_dir,
                     lambda *args, **kwargs: bench_exec.RunMetrics(

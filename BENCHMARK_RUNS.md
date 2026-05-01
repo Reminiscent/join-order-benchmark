@@ -63,7 +63,9 @@ parameters:
 - 3 measured repetitions are collected for each selected query and variant.
 - 1 warmup pass is run for each query group before measured repetitions.
 - Each prepared database is stabilized with `VACUUM FREEZE ANALYZE` and a
-  best-effort `CHECKPOINT` before measurement.
+  best-effort `CHECKPOINT` before measurement for a new run.
+- `--resume-run-id` preserves the existing database statistics snapshot instead
+  of re-running stabilization for the resumed portion.
 - Variant order is rotated across query groups and repetitions.
 - If a warmup execution hits `statement_timeout`, later measured repetitions
   for the same `(dataset, query, variant)` are recorded as skipped timeout rows
