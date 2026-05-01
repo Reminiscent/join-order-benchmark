@@ -36,8 +36,6 @@ class SummaryRow:
     dataset: str
     variant: str
     query_id: str
-    query_label: str
-    query_path: str
     join_size: int
     ok_reps: int
     err_reps: int
@@ -60,7 +58,6 @@ class ReviewTableCell:
 @dataclass(frozen=True)
 class ReviewTableRow:
     query_id: str
-    query_label: str
     join_size: int
     values: dict[str, ReviewTableCell]
     ratios: dict[str, ReviewTableCell]
@@ -81,7 +78,6 @@ class ReviewTable:
     rows: tuple[ReviewTableRow, ...]
     total_values: dict[str, ReviewTableCell]
     total_ratios: dict[str, ReviewTableCell]
-    include_query_label: bool
 
 
 def parse_csv_list(raw: Optional[str]) -> list[str]:
@@ -110,8 +106,6 @@ def load_summary_rows(summary_path: Path) -> tuple[dict[str, dict[str, dict[str,
             "dataset",
             "variant",
             "query_id",
-            "query_label",
-            "query_path",
             "join_size",
             "ok_reps",
             "err_reps",
@@ -130,8 +124,6 @@ def load_summary_rows(summary_path: Path) -> tuple[dict[str, dict[str, dict[str,
                 dataset=raw["dataset"],
                 variant=raw["variant"],
                 query_id=raw["query_id"],
-                query_label=raw["query_label"],
-                query_path=raw["query_path"],
                 join_size=int(raw["join_size"]),
                 ok_reps=int(raw["ok_reps"] or "0"),
                 err_reps=int(raw["err_reps"] or "0"),
@@ -218,11 +210,6 @@ def first_row_for_query(dataset_rows: dict[str, dict[str, SummaryRow]], query_id
     return None
 
 
-def query_label_for_query(dataset_rows: dict[str, dict[str, SummaryRow]], query_id: str) -> str:
-    row = first_row_for_query(dataset_rows, query_id)
-    return row.query_label if row is not None else ""
-
-
 def dedupe_preserve(items: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -288,7 +275,6 @@ def build_review_table(
 
     query_ids = sorted(query_order[dataset], key=natural_key)
     labels = label_map(run_context, variants)
-    include_query_label = any(query_label_for_query(dataset_rows, query_id) for query_id in query_ids)
 
     rows: list[ReviewTableRow] = []
     previous_family = ""
@@ -313,7 +299,6 @@ def build_review_table(
         rows.append(
             ReviewTableRow(
                 query_id=query_id,
-                query_label=sample.query_label,
                 join_size=sample.join_size,
                 values=values,
                 ratios=ratios,
@@ -354,7 +339,6 @@ def build_review_table(
         rows=tuple(rows),
         total_values=total_values,
         total_ratios=total_ratios,
-        include_query_label=include_query_label,
     )
 
 
@@ -364,22 +348,16 @@ def render_review_table_csv(table: ReviewTable) -> str:
     out = StringIO()
     writer = csv.writer(out, lineterminator="\n")
     header = ["query", "join_size"]
-    if table.include_query_label:
-        header.append("query_label")
     header.extend([f"{variant}_{table.metric_column}" for variant in table.variants])
     header.extend([f"{variant}_to_{table.reference}" for variant in table.variants if variant != table.reference])
     writer.writerow(header)
     for row in table.rows:
         cells: list[str] = [row.query_id, str(row.join_size)]
-        if table.include_query_label:
-            cells.append(row.query_label)
         cells.extend(cell.text for cell in row.values.values())
         cells.extend(cell.text for cell in row.ratios.values())
         writer.writerow(cells)
 
     total: list[str] = ["SUM", ""]
-    if table.include_query_label:
-        total.append("")
     total.extend(cell.text for cell in table.total_values.values())
     total.extend(cell.text for cell in table.total_ratios.values())
     writer.writerow(total)
@@ -445,7 +423,7 @@ def xlsx_row(row_idx: int, cells: list[str]) -> str:
 
 
 def xlsx_sheet_xml(table: ReviewTable) -> str:
-    query_cols = 2 + (1 if table.include_query_label else 0)
+    query_cols = 2
     value_start = query_cols + 1
     value_end = value_start + len(table.variants) - 1
     ratio_start = value_end + 1
@@ -471,11 +449,6 @@ def xlsx_sheet_xml(table: ReviewTable) -> str:
     merges.append("A4:A5")
     header_cells.append(xlsx_cell("B4", "joins", 3))
     merges.append("B4:B5")
-    col = 3
-    if table.include_query_label:
-        header_cells.append(xlsx_cell(f"{col_name(col)}4", "label", 3))
-        merges.append(f"{col_name(col)}4:{col_name(col)}5")
-        col += 1
     header_cells.append(
         xlsx_cell(
             f"{col_name(value_start)}4",
@@ -521,9 +494,6 @@ def xlsx_sheet_xml(table: ReviewTable) -> str:
         cells: list[str] = [xlsx_cell(f"A{row_idx}", table_row.query_id, 6)]
         cells.append(xlsx_cell(f"B{row_idx}", table_row.join_size, 7, numeric=True))
         col = 3
-        if table.include_query_label:
-            cells.append(xlsx_cell(f"{col_name(col)}{row_idx}", table_row.query_label, 6))
-            col += 1
         for variant in table.variants:
             cell = table_row.values[variant]
             cells.append(
@@ -585,10 +555,6 @@ def xlsx_sheet_xml(table: ReviewTable) -> str:
 
     width_entries = ['<col min="1" max="1" width="10" customWidth="1"/>']
     width_entries.append('<col min="2" max="2" width="8" customWidth="1"/>')
-    col = 3
-    if table.include_query_label:
-        width_entries.append(f'<col min="{col}" max="{col}" width="18" customWidth="1"/>')
-        col += 1
     if value_start <= value_end:
         width_entries.append(f'<col min="{value_start}" max="{value_end}" width="15" customWidth="1"/>')
     if ratio_start <= ratio_end:

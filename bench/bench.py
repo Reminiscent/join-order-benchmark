@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_conn_args(p: argparse.ArgumentParser) -> None:
         p.add_argument("--host", default=None, help="PostgreSQL host (for example localhost)")
-        p.add_argument("--port", type=int, default=None, help="PostgreSQL port (for example 54321)")
+        p.add_argument("--port", type=int, default=5432, help="PostgreSQL port (default: 5432)")
         p.add_argument("--user", default=None, help="PostgreSQL user")
 
     def add_variant_file_arg(p: argparse.ArgumentParser) -> None:

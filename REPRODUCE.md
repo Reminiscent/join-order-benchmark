@@ -34,8 +34,12 @@ export PATH="$PG_BUILD_DIR/bin:$PATH"
 Optional connection flags supported by every command:
 
 - `--host`
-- `--port`
+- `--port` (default: `5432`)
 - `--user`
+
+When `--host` is omitted, `psql` uses its normal local connection behavior.  The
+harness passes `--port 5432` by default; use `--port` only when the server is
+listening elsewhere.
 
 ## 2. Variants
 
@@ -66,7 +70,7 @@ If `--variants` is omitted, the selected scenario uses the built-in `dp` and
 
 ## 3. Data Setup
 
-Dataset details and IMDB CSV setup are documented in [DATASETS.md](DATASETS.md).
+Dataset details and IMDB CSV setup are documented in [WORKLOADS.md](WORKLOADS.md).
 
 Typical IMDB CSV setup:
 

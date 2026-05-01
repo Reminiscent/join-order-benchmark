@@ -19,46 +19,25 @@ documents how those tables were produced.
 | Review question | Evidence in this repository |
 | --- | --- |
 | What was tested first? | `main` is the primary validation scenario.  It runs the complete JOB and JOB-Complex workloads. |
-| Which broader workloads are included? | `extended` adds small-data planning/search-space stress workloads; `full` adds the heavier CEB IMDB 3k subset.  See [SCENARIOS.md](SCENARIOS.md) and [DATASETS.md](DATASETS.md). |
+| Which broader workloads are included? | `extended` adds small-data planning/search-space stress workloads; `full` adds the heavier CEB IMDB 3k subset.  See [WORKLOADS.md](WORKLOADS.md). |
 | Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an optional `--variants-file` and explicit `--variants` list. |
 | How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) describes the fixed public run protocol: prepare data, stabilize tables, warm up, measure, handle timeouts, and write artifacts. |
 | How can I reproduce it? | [REPRODUCE.md](REPRODUCE.md) is the command-oriented reproduction guide. |
-| How were timings collected? | PostgreSQL `EXPLAIN ANALYZE` JSON output is used to separate planning and execution time.  Measurement caveats are in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md). |
 
-The primary execution metric is `execution_ms_median`.  Planning time is a
-separate diagnostic metric, so planner overhead does not get mixed into
-execution behavior.
-
-## PostgreSQL Setup
+## Cluster Setup
 
 The concrete run sequence is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
-The PostgreSQL settings most relevant to review are listed below.  The public
-defaults are chosen so the benchmark can run on a machine with at least 16 GiB
-of RAM without tuning memory values per machine.
-
-| Setting | Public default | Applied by | Purpose |
-| --- | --- | --- | --- |
-| `shared_buffers` | `4GB` | user before run, requires restart | cluster-level buffer pool baseline, about 25% of the 16 GiB minimum |
-| `join_collapse_limit` | `100` | harness session GUC | allow the join-order algorithm under test to see wide join search spaces |
-| `max_parallel_workers_per_gather` | `0` | harness session GUC | reduce execution-time noise from parallel workers |
-| `work_mem` | `1GB` | harness session GUC | reduce spill noise for single-query serial benchmark runs |
-| `effective_cache_size` | `8GB` | harness session GUC | keep planner cache-size assumptions stable for the 16 GiB baseline |
-| `statement_timeout` | `600000 ms` by default; override with `--statement-timeout-ms` when needed | guard against very bad plans consuming the run for too long |
-
-If following the public setup, set `shared_buffers` outside the harness and
-restart PostgreSQL:
+For public runs, the only PostgreSQL setting that must be applied outside the
+harness is `shared_buffers=4GB`, because it requires a server restart:
 
 ```sql
 ALTER SYSTEM SET shared_buffers = '4GB';
 ```
 
-The session GUCs are applied by the harness for every warmup and measured
-execution.  See [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the run protocol,
-memory-setting rationale, and measurement caveats.
-
-`statement_timeout` is a guardrail rather than a join-order algorithm setting.
-If it is changed for a slower or faster machine, publish the value together with
-the result tables; the resolved value is recorded in `run.json`.
+The benchmark is intended to run on a machine with at least 16 GiB of RAM.  The
+harness applies the remaining session-level PostgreSQL settings before every
+warmup and measured execution; see [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for
+the exact session prelude and rationale.
 
 ## Minimal Reproduction
 
@@ -116,8 +95,7 @@ Top-level folders are split by responsibility:
 
 - [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md): fixed run protocol and timing semantics
 - [REPRODUCE.md](REPRODUCE.md): command-oriented reproduction workflow
-- [SCENARIOS.md](SCENARIOS.md): scenario layers
-- [DATASETS.md](DATASETS.md): workload coverage, IMDB CSV setup, and query counts
+- [WORKLOADS.md](WORKLOADS.md): scenario layers, workload coverage, IMDB CSV setup, and query counts
 - [OUTPUTS.md](OUTPUTS.md): run artifacts and reviewer tables
 - [examples/README.md](examples/README.md): extra variant file fields
 - [bench/README.md](bench/README.md): benchmark harness module layout

@@ -100,21 +100,13 @@ Columns:
 
 | Column | Meaning |
 | --- | --- |
-| `run_id` | Run id. |
-| `scenario` | Scenario name. |
 | `dataset` | Dataset id. |
-| `db` | PostgreSQL database used for that dataset. |
-| `variant` | Variant id. |
 | `query_id` | Query id inside the dataset. |
-| `query_label` | Optional query label from the manifest. |
-| `query_path` | SQL file path relative to the repository. |
-| `join_size` | Number of joined relations recorded in the query manifest. |
-| `variant_position` | Position of this variant in the rotated execution order for the query group. |
+| `variant` | Variant id. |
 | `rep` | Measured repetition number. |
 | `planning_ms` | PostgreSQL `Planning Time` from EXPLAIN JSON. |
-| `total_ms` | Planning plus execution time for the measured repetition. |
 | `execution_ms` | PostgreSQL `Execution Time` from EXPLAIN JSON. |
-| `execution_measurement_mode` | Measurement mode; currently backend EXPLAIN phase timings. |
+| `total_ms` | Planning plus execution time for the measured repetition. |
 | `plan_total_cost` | Root plan `Total Cost` from EXPLAIN JSON. |
 | `status` | `ok`, `timeout`, or `error`. |
 | `error` | Error text for timeout/error rows, otherwise empty. |
@@ -134,8 +126,7 @@ Columns:
 
 | Column | Meaning |
 | --- | --- |
-| `run_id`, `scenario`, `dataset`, `db`, `variant` | Same identifiers as `raw.csv`. |
-| `query_id`, `query_label`, `query_path`, `join_size` | Query metadata from the manifest. |
+| `dataset`, `query_id`, `join_size`, `variant` | Query and variant identifiers needed for reviewer tables. |
 | `planning_ms_median` | Median `planning_ms` over successful measured repetitions. |
 | `execution_ms_median` | Median `execution_ms` over successful measured repetitions. |
 | `total_ms_median` | Median `total_ms` over successful measured repetitions. |

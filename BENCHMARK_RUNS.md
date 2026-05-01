@@ -29,7 +29,8 @@ data.
 
 IMDB-backed datasets require `--csv-dir` because the CSV bundle is not vendored
 in this repository.  Self-contained datasets, including SQLite select5 and GPUQO
-small workloads, load local SQL files.
+small workloads, load local SQL files.  Scenario and dataset coverage is
+documented in [WORKLOADS.md](WORKLOADS.md).
 
 ## Run Phase
 
@@ -115,8 +116,9 @@ References:
 
 ## Session Setup
 
-Each warmup and measured execution starts with a fresh session prelude.  With
-the default timeout it is:
+Each warmup and measured execution starts with a fresh session prelude.  This
+is where the harness applies the session-level PostgreSQL settings used by the
+test.  With the default timeout it is:
 
 ```sql
 RESET ALL;

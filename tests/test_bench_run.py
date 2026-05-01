@@ -25,7 +25,7 @@ FIXED_NOW = datetime(2026, 4, 11, 9, 0, 0, tzinfo=timezone.utc)
 def write_summary_csv_stub(summary_path: Path, **_: object) -> None:
     summary_path.write_text(
         (
-            "run_id,scenario,dataset,db,variant,query_id,query_label,query_path,join_size,"
+            "dataset,query_id,join_size,variant,"
             "planning_ms_median,execution_ms_median,total_ms_median,plan_total_cost_median,ok_reps,err_reps\n"
         )
     )

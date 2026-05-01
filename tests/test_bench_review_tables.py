@@ -35,11 +35,11 @@ class BenchReviewTablesTests(unittest.TestCase):
         (run_dir / "summary.csv").write_text(
             "\n".join(
                 [
-                    "run_id,scenario,dataset,db,variant,query_id,query_label,query_path,join_size,planning_ms_median,execution_ms_median,total_ms_median,plan_total_cost_median,ok_reps,err_reps",
-                    "run1,main,job,imdb_bench,dp,10a,,q/10a.sql,7,2.000,100.000,102.000,1000.000,3,0",
-                    "run1,main,job,imdb_bench,my_algo,10a,,q/10a.sql,7,1.000,80.000,81.000,900.000,3,0",
-                    "run1,main,job,imdb_bench,dp,2a,,q/2a.sql,12,4.000,200.000,204.000,1000.000,3,0",
-                    "run1,main,job,imdb_bench,my_algo,2a,,q/2a.sql,12,8.000,500.000,508.000,900.000,3,0",
+                    "dataset,query_id,join_size,variant,planning_ms_median,execution_ms_median,total_ms_median,plan_total_cost_median,ok_reps,err_reps",
+                    "job,10a,7,dp,2.000,100.000,102.000,1000.000,3,0",
+                    "job,10a,7,my_algo,1.000,80.000,81.000,900.000,3,0",
+                    "job,2a,12,dp,4.000,200.000,204.000,1000.000,3,0",
+                    "job,2a,12,my_algo,8.000,500.000,508.000,900.000,3,0",
                     "",
                 ]
             )

@@ -61,4 +61,5 @@ bench_review_tables.py -> reviewer-facing XLSX/CSV tables
 ```
 
 The benchmark protocol itself is described in [../BENCHMARK_RUNS.md](../BENCHMARK_RUNS.md).
+Scenario and dataset coverage is described in [../WORKLOADS.md](../WORKLOADS.md).
 Output formats are described in [../OUTPUTS.md](../OUTPUTS.md).

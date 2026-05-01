@@ -14,26 +14,19 @@ def write_raw_csv(raw_path: Path, raw_rows: list[dict[str, str]]) -> None:
         writer = csv.DictWriter(
             f,
             fieldnames=[
-                "run_id",
-                "scenario",
                 "dataset",
-                "db",
-                "variant",
                 "query_id",
-                "query_label",
-                "query_path",
-                "join_size",
-                "variant_position",
+                "variant",
                 "rep",
                 "planning_ms",
-                "total_ms",
                 "execution_ms",
-                "execution_measurement_mode",
+                "total_ms",
                 "plan_total_cost",
                 "status",
                 "error",
             ],
             lineterminator="\n",
+            extrasaction="ignore",
         )
         writer.writeheader()
         writer.writerows(raw_rows)
@@ -42,8 +35,6 @@ def write_raw_csv(raw_path: Path, raw_rows: list[dict[str, str]]) -> None:
 def write_summary_csv(
     summary_path: Path,
     *,
-    run_id: str,
-    scenario_name: str,
     resolved_runs: list[Any],
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]],
 ) -> None:
@@ -51,15 +42,10 @@ def write_summary_csv(
         writer = csv.DictWriter(
             f,
             fieldnames=[
-                "run_id",
-                "scenario",
                 "dataset",
-                "db",
-                "variant",
                 "query_id",
-                "query_label",
-                "query_path",
                 "join_size",
+                "variant",
                 "planning_ms_median",
                 "execution_ms_median",
                 "total_ms_median",
@@ -85,15 +71,10 @@ def write_summary_csv(
                         total_vals = [float(entry["total_ms"]) for entry in ok]
                         cost_vals = [float(entry["plan_total_cost"]) for entry in ok]
                         row = {
-                            "run_id": run_id,
-                            "scenario": scenario_name,
                             "dataset": spec.dataset,
-                            "db": spec.db,
-                            "variant": variant_name,
                             "query_id": q.query_id,
-                            "query_label": q.query_label,
-                            "query_path": q.query_path,
                             "join_size": str(q.join_size),
+                            "variant": variant_name,
                             "planning_ms_median": f"{statistics.median(planning_vals):.3f}",
                             "execution_ms_median": f"{statistics.median(execution_vals):.3f}",
                             "total_ms_median": f"{statistics.median(total_vals):.3f}",
@@ -103,15 +84,10 @@ def write_summary_csv(
                         }
                     else:
                         row = {
-                            "run_id": run_id,
-                            "scenario": scenario_name,
                             "dataset": spec.dataset,
-                            "db": spec.db,
-                            "variant": variant_name,
                             "query_id": q.query_id,
-                            "query_label": q.query_label,
-                            "query_path": q.query_path,
                             "join_size": str(q.join_size),
+                            "variant": variant_name,
                             "planning_ms_median": "",
                             "execution_ms_median": "",
                             "total_ms_median": "",

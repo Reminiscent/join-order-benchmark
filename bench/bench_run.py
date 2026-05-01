@@ -153,7 +153,6 @@ def build_summary_acc_from_raw_rows(raw_rows: list[dict[str, str]]) -> dict[tupl
                 "planning_ms": float(row["planning_ms"]) if row["planning_ms"] else -1.0,
                 "total_ms": float(row["total_ms"]) if row["total_ms"] else -1.0,
                 "execution_ms": float(row["execution_ms"]) if row["execution_ms"] else -1.0,
-                "execution_measurement_mode": row["execution_measurement_mode"],
                 "plan_total_cost": float(row["plan_total_cost"]) if row["plan_total_cost"] else -1.0,
                 "status": row["status"],
             }
@@ -250,8 +249,6 @@ def flush_outputs(
     summary_path = out_dir / "summary.csv"
     write_summary_csv(
         summary_path,
-        run_id=run_id,
-        scenario_name=scenario.name,
         resolved_runs=resolved_runs,
         summary_acc=summary_acc,
     )
@@ -521,7 +518,7 @@ def run_scenario(
                     else list(entry_variants)
                 )
 
-                for variant_pos, variant in enumerate(ordered_variants, start=1):
+                for variant in ordered_variants:
                     key = (spec.dataset, q.query_id, variant.name)
                     status = "ok"
                     err = ""
@@ -529,7 +526,6 @@ def run_scenario(
                     total_ms = -1.0
                     exec_ms = -1.0
                     plan_total_cost = -1.0
-                    execution_measurement_mode = "explain_analyze_summary_timing_off_json"
 
                     if key in warmup_timeout_keys:
                         status = "timeout"
@@ -559,21 +555,13 @@ def run_scenario(
 
                     raw_rows.append(
                         {
-                            "run_id": run_id,
-                            "scenario": scenario.name,
                             "dataset": spec.dataset,
-                            "db": spec.db,
-                            "variant": variant.name,
                             "query_id": q.query_id,
-                            "query_label": q.query_label,
-                            "query_path": q.query_path,
-                            "join_size": str(q.join_size),
+                            "variant": variant.name,
                             "rep": str(rep),
-                            "variant_position": str(variant_pos),
                             "planning_ms": f"{planning_ms:.3f}" if planning_ms >= 0 else "",
-                            "total_ms": f"{total_ms:.3f}" if total_ms >= 0 else "",
                             "execution_ms": f"{exec_ms:.3f}" if exec_ms >= 0 else "",
-                            "execution_measurement_mode": execution_measurement_mode if status == "ok" else "",
+                            "total_ms": f"{total_ms:.3f}" if total_ms >= 0 else "",
                             "plan_total_cost": f"{plan_total_cost:.3f}" if plan_total_cost >= 0 else "",
                             "status": status,
                             "error": err,
@@ -586,7 +574,6 @@ def run_scenario(
                             "planning_ms": planning_ms,
                             "total_ms": total_ms,
                             "execution_ms": exec_ms,
-                            "execution_measurement_mode": execution_measurement_mode,
                             "plan_total_cost": plan_total_cost,
                             "status": status,
                         }
