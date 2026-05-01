@@ -53,6 +53,24 @@ The runner checkpoints progress after complete warmup groups and complete
 measured groups, so `--resume-run-id` resumes from a safe group boundary rather
 than from the middle of a query's variant set.
 
+## Cluster Memory Baseline
+
+The public runs use a small-memory benchmark environment.  Most controls are
+session-level and are applied by the harness, but `shared_buffers` is a
+cluster-level setting and must be configured before the benchmark:
+
+```sql
+ALTER SYSTEM SET shared_buffers = '4GB';
+```
+
+Restart PostgreSQL after changing `shared_buffers`.  The goal is not to claim
+that `4GB` is a universal PostgreSQL recommendation; it fixes the buffer-pool
+baseline for the submitted public runs.  The paired session settings
+`work_mem=1GB` and `effective_cache_size=8GB` keep memory-spill behavior and
+planner cache-size assumptions stable for that environment.
+`effective_cache_size` is a planner costing assumption, not memory allocated by
+the backend.
+
 ## Session Setup
 
 Each warmup and measured execution starts with a fresh session prelude:
@@ -71,9 +89,8 @@ Variant settings are applied after scenario settings, so the variant can choose
 the intended algorithm.  Optional variant GUCs are applied only when the current
 PostgreSQL build exposes that GUC.
 
-The harness does not change restart-required cluster settings such as
-`shared_buffers`.  Those must be configured outside the benchmark if a submitted
-run depends on them.
+The harness does not change restart-required cluster settings.  Those must be
+configured outside the benchmark if a submitted run depends on them.
 
 ## Stabilization
 
@@ -131,16 +148,33 @@ This is used for three reasons:
 - `TIMING OFF` disables per-node timing overhead while PostgreSQL still measures
   top-level statement runtime.
 
-PostgreSQL documents that `Planning Time` is plan generation time, while
-`Execution Time` excludes parsing, rewriting, and planning.  PostgreSQL also
-documents that node-level timing can add profiling overhead, and that statement
-runtime is still measured when node-level timing is disabled.
+`EXPLAIN ANALYZE` is not treated as a zero-overhead latency measurement here.
+PostgreSQL documents that node-level timing can add profiling overhead and that
+the overhead depends on the query and platform.  This benchmark reduces that
+specific source of error with `TIMING OFF`, does not request per-node timings,
+does not use buffer or WAL timing, and compares medians/ratios across variants
+under the same measurement path.
 
-On PostgreSQL master, commit
+Some residual overhead still remains because the statement is executed through
+`EXPLAIN ANALYZE`, summary timing must still be measured, and JSON output must
+be produced.  This is the tradeoff for getting planning and execution phase
+times from the PostgreSQL backend in one structured result.  For very short
+execution-time queries, especially the small-data planning-stress workloads,
+execution-time numbers should be read as diagnostic rather than as normal
+client-visible latency.  Planning-time results are the main signal for those
+workloads.
+
+PostgreSQL documents that `Planning Time` is plan generation time, while
+`Execution Time` excludes parsing, rewriting, and planning.  It also documents
+that statement runtime is still measured when node-level timing is disabled.
+
+On the PostgreSQL development branch, commit
 `294520c44487ecaade7a6ea8781b973f9ed03909` further reduced
 `EXPLAIN ANALYZE` timing overhead on x86-64 by using the CPU time-stamp counter
 for instrumentation timing.  The benchmark still uses `TIMING OFF` because
-per-node timings are not needed for join-order comparisons.
+per-node timings are not needed for join-order comparisons.  Builds without
+that commit may have higher instrumentation overhead, but the benchmark protocol
+remains the same across compared variants in a submitted run.
 
 References:
 

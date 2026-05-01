@@ -139,7 +139,7 @@ python3 bench/bench.py run full
 ```
 
 In `extended` and `full`, `gpuqo_clique_small` keeps non-`dp` variants on the
-full dataset while limiting `dp` to `join_size <= 12`.
+complete 150-query dataset while limiting `dp` to `join_size <= 12`.
 
 ## 7. Output Layout
 
@@ -226,7 +226,16 @@ The harness does not modify cluster-level settings such as:
 - `shared_buffers`
 - other restart-required PostgreSQL settings
 
-Prepare cluster-level settings outside the benchmark harness.
+For the public setup, set `shared_buffers` before the benchmark and restart
+PostgreSQL:
+
+```sql
+ALTER SYSTEM SET shared_buffers = '4GB';
+```
+
+The memory-related session settings `work_mem=1GB` and
+`effective_cache_size=8GB` are applied by the harness.  `effective_cache_size`
+is a planner costing assumption, not memory allocated by PostgreSQL.
 
 ## 11. Useful Overrides
 
