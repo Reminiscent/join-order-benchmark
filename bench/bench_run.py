@@ -73,9 +73,7 @@ def dataset_contexts(resolved_runs: list[ResolvedDatasetRun]) -> list[dict[str, 
     return [
         {
             "dataset": spec.dataset,
-            "min_join": spec.min_join,
             "max_join": spec.max_join,
-            "max_queries": spec.max_queries,
             "variants": list(spec.variants),
         }
         for spec in resolved_runs
@@ -327,16 +325,14 @@ def run_scenario(
             {
                 "dataset": spec.dataset,
                 "db": spec.db,
-                "min_join": spec.min_join,
                 "max_join": spec.max_join,
-                "max_queries": spec.max_queries,
                 "queries_selected": len(query_plans),
                 "variants": list(spec.variants),
             }
         )
         print(
             f"[run] dataset={spec.dataset} db={spec.db} queries={len(query_plans)} "
-            f"variants={','.join(spec.variants)} min_join={spec.min_join} max_join={spec.max_join}"
+            f"variants={','.join(spec.variants)} max_join={spec.max_join}"
         )
 
         entry_variants = [variants_registry[name] for name in spec.variants]

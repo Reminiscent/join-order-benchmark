@@ -153,9 +153,7 @@ def build_run_context(
         "datasets": [
             {
                 "dataset": entry["dataset"],
-                "min_join": entry["min_join"],
                 "max_join": entry["max_join"],
-                "max_queries": entry["max_queries"],
                 "variants": entry["variants"],
             }
             for entry in query_counts

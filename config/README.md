@@ -30,11 +30,11 @@ Supported fields per scenario:
 - `session_gucs`
   Scenario-level session settings applied before variant-level settings.
 - `[[scenario.<name>.dataset]]`
-  Dataset entries selected by the scenario.  Entries may include `min_join`,
-  `max_join`, `max_queries`, a per-entry `variants` subset, or
-  `exclude_variants`.  Use `exclude_variants` for "all selected variants except
-  these"; for example, `gpuqo_clique_small` runs non-`dp` variants fully while
-  `dp` is limited to `join_size <= 12`.
+  Dataset entries selected by the scenario.  Entries may include `max_join`, a
+  per-entry `variants` subset, or `exclude_variants`.  Use `exclude_variants`
+  for "all selected variants except these"; for example,
+  `gpuqo_clique_small` runs non-`dp` variants fully while `dp` is limited to
+  `join_size <= 12`.
 
 ## Variants
 

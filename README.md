@@ -19,10 +19,11 @@ documents how those tables were produced.
 | Review question | Evidence in this repository |
 | --- | --- |
 | What was tested first? | `main` is the primary validation scenario.  It runs the full JOB and JOB-Complex workloads. |
-| Which workloads are included? | The scenario table below summarizes the layers; [DATASETS.md](DATASETS.md) records source repositories, related papers, query counts, join sizes, and data requirements. |
+| Which workloads are included? | [SCENARIOS.md](SCENARIOS.md) describes `main`, `extended`, and `full`; [DATASETS.md](DATASETS.md) records source repositories, related papers, query counts, join sizes, and data requirements. |
 | Which algorithm variants were compared? | A submitted run should state its `--variants` list.  Baselines and other experiment-specific variants are described below. |
 | What benchmark parameters were used? | The public run defaults are listed below.  The exact resolved values for a submitted run are in its `run.json`. |
 | How were timings collected? | The measurement protocol below uses PostgreSQL `EXPLAIN ANALYZE` JSON output with planning and execution reported separately. |
+| How were the uploaded tables produced? | [tools/render_review_tables.py](tools/render_review_tables.py) renders styled Excel workbooks with execution-time and planning-time sheets from `summary.csv`. |
 | Where are the results? | Results are expected to be uploaded separately, for example as Excel/PDF tables.  If exact tracing is needed, inspect the uploaded `run.json` and `raw.csv` from the same run. |
 
 The primary execution metric is `execution_ms_median`.  Planning time is a
@@ -81,24 +82,9 @@ resume behavior, and useful overrides.
 
 ## Scenarios
 
-Scenarios are the public workload layers.  They are defined in
-[config/scenarios.toml](config/scenarios.toml).
-
-| Scenario | Purpose | Workload scope |
-| --- | --- | --- |
-| `main` | First-line validation for a new algorithm | full `job` and `job_complex` |
-| `extended` | Broader planning/search-space validation after `main` looks good | `main` plus self-contained stress workloads, excluding `imdb_ceb_3k` |
-| `full` | Complete built-in campaign | `extended` plus `imdb_ceb_3k` |
-
-The extra workloads in `extended` are converted from existing upstream
-benchmarks and contain small self-contained data.  They are most useful for
-planning time and join-search stress because they include many wide join queries.
-`full` adds `imdb_ceb_3k`, which has much higher query volume and can dominate
-campaign time.
-
-In `extended` and `full`, `gpuqo_clique_small` has one tractability guard:
-non-`dp` variants run the full dataset, while `dp` is limited to
-`join_size <= 12`.
+Scenarios are the public workload layers.  `main` is the first-line validation
+run and contains the full JOB and JOB-Complex workloads.  The exact `main`,
+`extended`, and `full` definitions are documented in [SCENARIOS.md](SCENARIOS.md).
 
 ## Variants
 
@@ -109,7 +95,7 @@ repository's experiments, not a fixed requirement for every submitted result.
 Use a custom variant file when testing another algorithm or parameter set:
 
 ```bash
-python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,my_algo
+python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
 ```
 
 Variant fields are documented in [config/README.md](config/README.md).
@@ -135,6 +121,25 @@ The harness applies session-level benchmark settings and records them in
 `run.json`.  It does not modify cluster-level settings such as `shared_buffers`
 or other restart-required PostgreSQL settings.
 
+## Reviewer Tables
+
+Use [tools/render_review_tables.py](tools/render_review_tables.py) to turn a
+completed run into per-query tables suitable for community attachments.  Each
+workbook contains an execution-time sheet and a planning-time sheet generated
+from the same `summary.csv`.
+
+The generated workbook groups metric columns and ratio columns, colors ratio
+cells relative to `dp`, and includes a `SUM` row.  CSV
+companions are written next to the workbook for plain-text inspection.
+
+Example:
+
+```bash
+python3 tools/render_review_tables.py outputs/<run_id> \
+  --dataset job \
+  --variants dp,geqo,my_algo
+```
+
 ## Outputs
 
 Run outputs are local and ignored by git.  They are mainly for auditability and
@@ -149,5 +154,6 @@ audited.  The full layout is documented in [REPRODUCE.md](REPRODUCE.md).
 ## More Detail
 
 - [REPRODUCE.md](REPRODUCE.md): full reproduction workflow and CLI overrides
+- [SCENARIOS.md](SCENARIOS.md): scenario layers
 - [DATASETS.md](DATASETS.md): workload coverage, IMDB CSV setup, and query counts
 - [config/README.md](config/README.md): scenario and variant file fields

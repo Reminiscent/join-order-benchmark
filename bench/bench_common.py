@@ -38,9 +38,7 @@ class Variant:
 @dataclass(frozen=True)
 class DatasetSpec:
     dataset: str
-    min_join: Optional[int] = None
     max_join: Optional[int] = None
-    max_queries: Optional[int] = None
     variants: Optional[tuple[str, ...]] = None
     exclude_variants: Optional[tuple[str, ...]] = None
 
@@ -62,9 +60,7 @@ class Scenario:
 class ResolvedDatasetRun:
     dataset: str
     db: str
-    min_join: Optional[int]
     max_join: Optional[int]
-    max_queries: Optional[int]
     variants: tuple[str, ...]
 
 

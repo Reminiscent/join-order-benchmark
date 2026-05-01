@@ -115,9 +115,7 @@ def load_scenarios() -> dict[str, Scenario]:
             datasets.append(
                 DatasetSpec(
                     dataset=dataset,
-                    min_join=int(item["min_join"]) if "min_join" in item else None,
                     max_join=int(item["max_join"]) if "max_join" in item else None,
-                    max_queries=int(item["max_queries"]) if "max_queries" in item else None,
                     variants=variants,
                     exclude_variants=exclude_variants,
                 )
@@ -171,9 +169,7 @@ def resolve_dataset_runs(
             ResolvedDatasetRun(
                 dataset=spec.dataset,
                 db=dataset_db_name(spec.dataset),
-                min_join=spec.min_join,
                 max_join=spec.max_join,
-                max_queries=spec.max_queries,
                 variants=entry_variants,
             )
         )
@@ -197,9 +193,7 @@ def resolve_prepare_dataset_runs(
             ResolvedDatasetRun(
                 dataset=dataset,
                 db=dataset_db_name(dataset),
-                min_join=None,
                 max_join=None,
-                max_queries=None,
                 variants=(),
             )
         )

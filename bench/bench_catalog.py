@@ -173,18 +173,10 @@ def dataset_prepare_scripts(dataset: str) -> tuple[Path, Path, Optional[Path], b
 
 def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
     queries = parse_manifest(spec.dataset)
-    if spec.min_join is not None:
-        queries = [q for q in queries if q.join_size >= spec.min_join]
     if spec.max_join is not None:
         queries = [q for q in queries if q.join_size <= spec.max_join]
-    if spec.max_queries is not None:
-        queries = queries[: spec.max_queries]
     if not queries:
-        die(
-            "no queries selected "
-            f"(dataset={spec.dataset}, min_join={spec.min_join}, max_join={spec.max_join}, "
-            f"max_queries={spec.max_queries})"
-        )
+        die(f"no queries selected (dataset={spec.dataset}, max_join={spec.max_join})")
     return queries
 
 

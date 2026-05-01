@@ -62,38 +62,9 @@ load scripts.
 
 ## Scenario Coverage
 
-`main` is the first public algorithm-validation layer.  It is the scenario to
-run first when evaluating a new join-order algorithm:
-
-- `job`
-- `job_complex`
-
-`extended` is the broader built-in layer after `main` passes:
-
-- `job`
-- `job_complex`
-- `sqlite_select5`
-- `gpuqo_chain_small`
-- `gpuqo_clique_small`
-- `gpuqo_star_small`
-- `gpuqo_snowflake_small`
-
-The extra `extended` workloads are adapted from SQLite and GPUQO sources rather
-than locally invented query patterns.  They are not no-data tests: each has a
-small deterministic local `load.sql`.  Because the data is small and the joins
-are wide, use them mainly for planning-time and join-search-space validation,
-not as realistic execution-time claims.
-
-`full` is the complete built-in campaign:
-
-- all `extended` datasets
-- `imdb_ceb_3k`
-
-`imdb_ceb_3k` has much higher query volume than the other workloads and can
-dominate campaign time.
-
-In `extended` and `full`, `gpuqo_clique_small` keeps non-`dp` variants on the
-full 150-query set while limiting `dp` to `join_size <= 12`.
+Scenario-level coverage is documented in [SCENARIOS.md](SCENARIOS.md).  This
+file only records dataset sources, local adaptations, data requirements, and
+query-count metadata.
 
 ## Prepare Commands
 

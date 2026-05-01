@@ -182,7 +182,42 @@ outputs/<run_id>/
 
 - machine-readable form of the same public report
 
-## 8. Measurement Semantics
+## 8. Reviewer Tables
+
+Use `tools/render_review_tables.py` to create per-query tables for community
+attachments from an existing `outputs/<run_id>/` directory.  The script writes a
+styled XLSX workbook and CSV companion files.
+
+Default table export:
+
+```bash
+python3 tools/render_review_tables.py outputs/<run_id> \
+  --dataset job \
+  --variants dp,geqo,my_algo
+```
+
+The workbook contains one execution-time sheet and one planning-time sheet.
+Execution time is the primary result; planning time is reported separately as a
+diagnostic.
+
+The workbook separates metric values from ratio columns, colors ratio cells
+relative to `dp`, and includes a `SUM` row.  Per-query ratios are direct
+`variant/dp` ratios to match spreadsheet-style reports.
+
+Workbook formatting rules:
+
+- one sheet for execution time and one sheet for planning time
+- first columns: query id and join size
+- middle column group: per-variant median metric values in milliseconds
+- last column group: each non-`dp` variant divided by `dp`
+- `SUM` row: sums metric values over comparable rows, then computes the total
+  ratio
+- green ratio cells: faster than `dp` (`< 0.95`)
+- white ratio cells: roughly equivalent (`0.95` through `1.05`)
+- yellow/orange/red ratio cells: slower than `dp` (`> 1.05`, with darker colors
+  for larger slowdowns)
+
+## 9. Measurement Semantics
 
 Current default measurement protocol:
 
@@ -212,7 +247,7 @@ To re-render the default public report:
 python3 tools/render_public_reports.py outputs/<run_id>
 ```
 
-## 9. Session-Level vs Cluster-Level Settings
+## 10. Session-Level vs Cluster-Level Settings
 
 The harness applies and records session-level benchmark settings, such as:
 
@@ -229,7 +264,7 @@ The harness does not modify cluster-level settings such as:
 
 Prepare cluster-level settings outside the benchmark harness.
 
-## 10. Useful Overrides
+## 11. Useful Overrides
 
 The following overrides are available on `run`:
 

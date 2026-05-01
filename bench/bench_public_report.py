@@ -10,7 +10,6 @@ from typing import Any
 
 
 PRIMARY_REFERENCE_VARIANT = "dp"
-RATIO_FLOOR_MS = 1.0
 P99_MIN_COMPARABLE = 200
 EQUIVALENCE_LOW = 0.95
 EQUIVALENCE_HIGH = 1.05
@@ -111,8 +110,10 @@ def nearest_rank(values: list[float], percentile: float) -> float:
     return ordered[idx]
 
 
-def ratio_with_floor(algo_ms: float, ref_ms: float, floor_ms: float) -> float:
-    return (algo_ms + floor_ms) / (ref_ms + floor_ms)
+def ratio_to_reference(algo_ms: float, ref_ms: float) -> float | None:
+    if ref_ms <= 0:
+        return None
+    return algo_ms / ref_ms
 
 
 def format_float(value: float | None, digits: int = 3) -> str:
@@ -272,7 +273,6 @@ def ratio_rows_for_metric(
     reference: str,
     metric: MetricSpec,
     label_by_name: dict[str, str],
-    ratio_floor_ms: float,
 ) -> tuple[list[dict[str, Any]], bool]:
     out: list[dict[str, Any]] = []
     any_p99 = False
@@ -286,13 +286,12 @@ def ratio_rows_for_metric(
             ref_row = dataset_rows[reference][query_id]
             assert row.metric_value(metric.column) is not None
             assert ref_row.metric_value(metric.column) is not None
-            ratios.append(
-                ratio_with_floor(
-                    row.metric_value(metric.column) or 0.0,
-                    ref_row.metric_value(metric.column) or 0.0,
-                    ratio_floor_ms,
-                )
+            ratio = ratio_to_reference(
+                row.metric_value(metric.column) or 0.0,
+                ref_row.metric_value(metric.column) or 0.0,
             )
+            if ratio is not None:
+                ratios.append(ratio)
         if not ratios:
             out.append(
                 {
@@ -345,7 +344,6 @@ def tail_rows_for_metric(
     reference: str,
     metric: MetricSpec,
     label_by_name: dict[str, str],
-    ratio_floor_ms: float,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for variant in variants:
@@ -358,13 +356,12 @@ def tail_rows_for_metric(
             ref_row = dataset_rows[reference][query_id]
             assert row.metric_value(metric.column) is not None
             assert ref_row.metric_value(metric.column) is not None
-            ratios.append(
-                ratio_with_floor(
-                    row.metric_value(metric.column) or 0.0,
-                    ref_row.metric_value(metric.column) or 0.0,
-                    ratio_floor_ms,
-                )
+            ratio = ratio_to_reference(
+                row.metric_value(metric.column) or 0.0,
+                ref_row.metric_value(metric.column) or 0.0,
             )
+            if ratio is not None:
+                ratios.append(ratio)
         out.append(
             {
                 "variant": variant,
@@ -430,7 +427,6 @@ def top_regression_rows_for_metric(
     reference: str,
     metric: MetricSpec,
     label_by_name: dict[str, str],
-    ratio_floor_ms: float,
 ) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     if not metric.show_top_regressions:
@@ -445,17 +441,13 @@ def top_regression_rows_for_metric(
             ref_row = dataset_rows[reference][query_id]
             assert row.metric_value(metric.column) is not None
             assert ref_row.metric_value(metric.column) is not None
-            ranked.append(
-                (
-                    ratio_with_floor(
-                        row.metric_value(metric.column) or 0.0,
-                        ref_row.metric_value(metric.column) or 0.0,
-                        ratio_floor_ms,
-                    ),
-                    row,
-                    ref_row,
-                )
+            ratio = ratio_to_reference(
+                row.metric_value(metric.column) or 0.0,
+                ref_row.metric_value(metric.column) or 0.0,
             )
+            if ratio is None:
+                continue
+            ranked.append((ratio, row, ref_row))
         ranked.sort(key=lambda item: (item[0], item[1].metric_value(metric.column) or 0.0), reverse=True)
         for ratio, row, ref_row in ranked[:TOP_REGRESSION_COUNT]:
             out.append(
@@ -510,7 +502,6 @@ def build_dataset_section(
     variants: list[str],
     reference: str,
     label_by_name: dict[str, str],
-    ratio_floor_ms: float,
 ) -> dict[str, Any]:
     metrics: list[dict[str, Any]] = []
     for metric in METRIC_SPECS:
@@ -522,9 +513,8 @@ def build_dataset_section(
             reference,
             metric,
             label_by_name,
-            ratio_floor_ms,
         )
-        tail_rows = tail_rows_for_metric(dataset_rows, query_ids, variants, reference, metric, label_by_name, ratio_floor_ms)
+        tail_rows = tail_rows_for_metric(dataset_rows, query_ids, variants, reference, metric, label_by_name)
         workload_rows = workload_rows_for_metric(dataset_rows, query_ids, variants, reference, metric, label_by_name)
         top_regressions = top_regression_rows_for_metric(
             dataset_rows,
@@ -533,7 +523,6 @@ def build_dataset_section(
             reference,
             metric,
             label_by_name,
-            ratio_floor_ms,
         )
         metrics.append(
             {
@@ -563,7 +552,6 @@ def build_public_report_bundle(
     *,
     run_context: dict[str, Any],
     summary_path: Path,
-    ratio_floor_ms: float = RATIO_FLOOR_MS,
 ) -> dict[str, Any]:
     rows_by_dataset, query_order = load_summary_rows(summary_path)
     dataset_order = dedupe_preserve([str(entry["dataset"]) for entry in run_context.get("datasets", []) if entry.get("dataset")])
@@ -593,7 +581,6 @@ def build_public_report_bundle(
                 variants=[variant for variant in variant_order if variant in rows_by_dataset[dataset]],
                 reference=reference,
                 label_by_name=label_by_name,
-                ratio_floor_ms=ratio_floor_ms,
             )
         )
 
@@ -608,7 +595,7 @@ def build_public_report_bundle(
         "Execution time is the primary replacement metric; planning time is reported separately as a diagnostic.",
         f"Metrics come from PostgreSQL backend phase times measured via `{measurement_lane}`.",
         "These numbers are not client end-to-end latencies; they exclude parse/rewrite, result formatting, and network transfer.",
-        f"Per-query ratios use additive smoothing: (algo_ms + {ratio_floor_ms:.1f}) / (reference_ms + {ratio_floor_ms:.1f}).",
+        "Per-query ratios are direct variant/reference ratios; queries with non-positive reference metrics are omitted from ratio summaries.",
         f"P99 is only shown when there are at least {P99_MIN_COMPARABLE} comparable queries.",
         "Workload-total rows sum per-query aggregated metric values on comparable queries only; coverage is reported separately.",
     ]
@@ -637,7 +624,6 @@ def build_public_report_bundle(
         "finished_at": run_context.get("finished_at", ""),
         "reference_variant": reference,
         "reference_label": public_label(reference, label_by_name),
-        "ratio_floor_ms": ratio_floor_ms,
         "variants": [
             {
                 "name": variant,
@@ -661,7 +647,7 @@ def markdown_lines_for_metric(metric: dict[str, Any], reference: str) -> list[st
     if reference_workload_row is not None and (reference_workload_row["total_ms"] or 0.0) <= 0.0:
         lines.extend(
             [
-                "This metric is at or below the current timing resolution for the reference variant on this dataset; ratio summaries are floor-stabilized and should be treated as non-informative.",
+                "This metric is at or below the current timing resolution for the reference variant on this dataset; ratio summaries may omit non-positive reference values.",
                 "",
             ]
         )
@@ -820,19 +806,17 @@ def write_public_reports(
     summary_path: Path,
     markdown_path: Path,
     json_path: Path,
-    ratio_floor_ms: float = RATIO_FLOOR_MS,
 ) -> dict[str, Any]:
     bundle = build_public_report_bundle(
         run_context=run_context,
         summary_path=summary_path,
-        ratio_floor_ms=ratio_floor_ms,
     )
     markdown_path.write_text(render_public_report_markdown(bundle))
     json_path.write_text(json.dumps(bundle, indent=2, sort_keys=True) + "\n")
     return bundle
 
 
-def rerender_public_reports_for_run_dir(run_dir: Path, *, ratio_floor_ms: float = RATIO_FLOOR_MS) -> tuple[Path, Path]:
+def rerender_public_reports_for_run_dir(run_dir: Path) -> tuple[Path, Path]:
     run_json = run_dir / "run.json"
     summary_csv = run_dir / "summary.csv"
     if not run_json.is_file():
@@ -848,6 +832,5 @@ def rerender_public_reports_for_run_dir(run_dir: Path, *, ratio_floor_ms: float 
         summary_path=summary_csv,
         markdown_path=markdown_path,
         json_path=json_path,
-        ratio_floor_ms=ratio_floor_ms,
     )
     return markdown_path, json_path

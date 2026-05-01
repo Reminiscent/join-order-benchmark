@@ -64,9 +64,7 @@ class RunScenarioTests(unittest.TestCase):
             ResolvedDatasetRun(
                 dataset="job",
                 db="bench_job",
-                min_join=None,
                 max_join=None,
-                max_queries=1,
                 variants=("dp",),
             )
         ]
