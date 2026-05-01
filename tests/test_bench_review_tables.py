@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 import tempfile
@@ -12,6 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_review_tables import write_review_tables
+
+
+HAS_XLSXWRITER = importlib.util.find_spec("xlsxwriter") is not None
 
 
 class BenchReviewTablesTests(unittest.TestCase):
@@ -48,6 +52,7 @@ class BenchReviewTablesTests(unittest.TestCase):
         )
         return run_dir
 
+    @unittest.skipUnless(HAS_XLSXWRITER, "XlsxWriter is optional and only needed for reviewer XLSX tables")
     def test_renders_workbook_and_metric_csv_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = self.make_run_dir(tmpdir)

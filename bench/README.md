@@ -31,7 +31,7 @@ shows how to add patch-specific variants.
 | [bench_exec.py](bench_exec.py) | Single-query execution.  It builds the per-run session prelude, executes `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`, parses planning/execution metrics, handles timeouts, and runs stabilization SQL. |
 | [bench_run.py](bench_run.py) | Scenario execution driver.  It verifies prepared databases and required GUCs, resolves selected queries and variants, performs warmup and measured repetitions, rotates variant order, records timeout/error rows, checkpoints progress, and supports `--resume-run-id`. |
 | [bench_results.py](bench_results.py) | Artifact writer for `raw.csv`, `summary.csv`, and `run.json`.  It defines the durable per-run output contract used by reviewer tables. |
-| [bench_review_tables.py](bench_review_tables.py) | Reviewer table renderer used by [../tools/render_review_tables.py](../tools/render_review_tables.py).  It creates one styled XLSX workbook and CSV companion files with `dp`-based ratios. |
+| [bench_review_tables.py](bench_review_tables.py) | Optional reviewer table renderer used by [../tools/render_review_tables.py](../tools/render_review_tables.py).  It creates one styled XLSX workbook and CSV companion files with `dp`-based ratios. |
 
 The core benchmark path is `bench.py` -> `bench_registry.py` ->
 `bench_catalog.py` -> `bench_prepare.py` / `bench_run.py` ->

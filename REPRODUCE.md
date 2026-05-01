@@ -19,7 +19,7 @@ You need:
   create the benchmark databases used by `prepare`
 
 The documented reproduction path is Python 3.11+ only.  No extra Python package
-is required for TOML parsing on supported Python versions.
+is required for prepare or run on supported Python versions.
 
 Following the public `shared_buffers=4GB` setup also requires either superuser
 access for `ALTER SYSTEM` or direct access to the PostgreSQL server
@@ -172,6 +172,13 @@ reviewer-table examples are documented in [OUTPUTS.md](OUTPUTS.md).
 Use `tools/render_review_tables.py` to create per-query tables for community
 attachments from an existing `outputs/<run_id>/` directory.  The script writes a
 styled XLSX workbook and CSV companion files.
+
+This step is optional.  It uses `XlsxWriter`, which is not needed for benchmark
+prepare/run:
+
+```bash
+python3 -m pip install XlsxWriter
+```
 
 Default table export:
 

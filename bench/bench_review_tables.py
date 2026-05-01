@@ -3,11 +3,9 @@ from __future__ import annotations
 import csv
 import json
 import re
-import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
-from xml.sax.saxutils import escape as xml_escape
 
 from bench_common import safe_artifact_name
 
@@ -19,7 +17,10 @@ METRICS = {
 
 DEFAULT_METRICS = ("execution", "planning")
 DEFAULT_REFERENCE_VARIANT = "dp"
-XLSX_PAGE_ORIENTATION = "landscape"
+XLSX_MISSING_DEPENDENCY = (
+    "missing optional dependency: install XlsxWriter before rendering reviewer XLSX tables "
+    "(for example: python3 -m pip install XlsxWriter)"
+)
 PUBLIC_LABELS = {
     "dp": "DP",
     "geqo": "GEQO",
@@ -391,18 +392,6 @@ def render_review_table_csv(table: ReviewTable) -> str:
     return out.getvalue()
 
 
-def col_name(col: int) -> str:
-    name = ""
-    while col:
-        col, rem = divmod(col - 1, 26)
-        name = chr(ord("A") + rem) + name
-    return name
-
-
-def xml_attr(value: object) -> str:
-    return xml_escape(str(value), {'"': "&quot;"})
-
-
 def sheet_name(raw: str, used: set[str]) -> str:
     base = re.sub(r"[][\\/*?:]", "_", raw).strip() or "sheet"
     base = base[:31]
@@ -416,330 +405,229 @@ def sheet_name(raw: str, used: set[str]) -> str:
     return name
 
 
-def xlsx_style_for_cell(cell: ReviewTableCell, *, total: bool = False) -> int:
+def xlsx_format_key(cell: ReviewTableCell, *, total: bool = False) -> str:
     css_class = cell.css_class
     if "missing" in css_class:
-        return 8
+        return "missing"
     if "ratio-fast-strong" in css_class:
-        return 17 if total else 9
+        return "total_ratio_fast_strong" if total else "ratio_fast_strong"
     if "ratio-fast" in css_class:
-        return 18 if total else 10
+        return "total_ratio_fast" if total else "ratio_fast"
     if "ratio-neutral" in css_class:
-        return 19 if total else 11
+        return "total_ratio_neutral" if total else "ratio_neutral"
     if "ratio-slow" in css_class:
-        return 20 if total else 12
+        return "total_ratio_slow" if total else "ratio_slow"
     if "ratio-slower" in css_class:
-        return 21 if total else 13
+        return "total_ratio_slower" if total else "ratio_slower"
     if "ratio-worst" in css_class:
-        return 22 if total else 14
+        return "total_ratio_worst" if total else "ratio_worst"
     if "numeric" in css_class:
-        return 16 if total else 7
-    return 15 if total else 6
+        return "total_numeric" if total else "numeric"
+    return "total_text" if total else "text"
 
 
-def xlsx_cell(ref: str, value: object | None, style: int, *, numeric: bool = False) -> str:
+def xlsx_formats(workbook: Any) -> dict[str, Any]:
+    border = {
+        "border": 1,
+        "border_color": "#D1D5DB",
+        "font_name": "Aptos",
+        "font_size": 11,
+        "valign": "vcenter",
+    }
+    numeric = {**border, "align": "right", "num_format": "0.00"}
+    total_base = {
+        **border,
+        "bold": True,
+        "top": 2,
+        "top_color": "#111827",
+    }
+    total_numeric = {**total_base, "align": "right", "num_format": "0.00"}
+
+    return {
+        "title": workbook.add_format(
+            {"font_name": "Aptos", "font_size": 14, "bold": True, "valign": "vcenter"}
+        ),
+        "meta": workbook.add_format({"font_name": "Aptos", "font_size": 11, "text_wrap": True}),
+        "header": workbook.add_format(
+            {**border, "bold": True, "align": "center", "text_wrap": True, "bg_color": "#E5E7EB"}
+        ),
+        "value_header": workbook.add_format(
+            {**border, "bold": True, "align": "center", "text_wrap": True, "bg_color": "#DBEAFE"}
+        ),
+        "ratio_header": workbook.add_format(
+            {**border, "bold": True, "align": "center", "text_wrap": True, "bg_color": "#F3F4F6"}
+        ),
+        "text": workbook.add_format(border),
+        "numeric": workbook.add_format(numeric),
+        "missing": workbook.add_format({**border, "bg_color": "#F3F4F6"}),
+        "ratio_fast_strong": workbook.add_format({**numeric, "bg_color": "#B7E1CD"}),
+        "ratio_fast": workbook.add_format({**numeric, "bg_color": "#D9EAD3"}),
+        "ratio_neutral": workbook.add_format({**numeric, "bg_color": "#FFFFFF"}),
+        "ratio_slow": workbook.add_format({**numeric, "bg_color": "#FFF2CC"}),
+        "ratio_slower": workbook.add_format({**numeric, "bg_color": "#FCE5CD"}),
+        "ratio_worst": workbook.add_format({**numeric, "bg_color": "#F4CCCC"}),
+        "total_text": workbook.add_format(total_base),
+        "total_numeric": workbook.add_format(total_numeric),
+        "total_ratio_fast_strong": workbook.add_format({**total_numeric, "bg_color": "#B7E1CD"}),
+        "total_ratio_fast": workbook.add_format({**total_numeric, "bg_color": "#D9EAD3"}),
+        "total_ratio_neutral": workbook.add_format({**total_numeric, "bg_color": "#FFFFFF"}),
+        "total_ratio_slow": workbook.add_format({**total_numeric, "bg_color": "#FFF2CC"}),
+        "total_ratio_slower": workbook.add_format({**total_numeric, "bg_color": "#FCE5CD"}),
+        "total_ratio_worst": workbook.add_format({**total_numeric, "bg_color": "#F4CCCC"}),
+    }
+
+
+def write_or_merge(
+    worksheet: Any,
+    first_row: int,
+    first_col: int,
+    last_row: int,
+    last_col: int,
+    value: object,
+    cell_format: Any,
+) -> None:
+    if first_row == last_row and first_col == last_col:
+        worksheet.write(first_row, first_col, value, cell_format)
+    else:
+        worksheet.merge_range(first_row, first_col, last_row, last_col, value, cell_format)
+
+
+def write_cell(worksheet: Any, row: int, col: int, value: object | None, cell_format: Any) -> None:
     if value is None or value == "":
-        return f'<c r="{ref}" s="{style}"/>'
-    if numeric:
-        return f'<c r="{ref}" s="{style}"><v>{xml_escape(str(value))}</v></c>'
-    return f'<c r="{ref}" s="{style}" t="inlineStr"><is><t>{xml_escape(str(value))}</t></is></c>'
+        worksheet.write_blank(row, col, None, cell_format)
+    elif isinstance(value, (int, float)):
+        worksheet.write_number(row, col, value, cell_format)
+    else:
+        worksheet.write(row, col, value, cell_format)
 
 
-def xlsx_row(row_idx: int, cells: list[str]) -> str:
-    return f'<row r="{row_idx}">{"".join(cells)}</row>'
+def require_xlsxwriter() -> Any:
+    try:
+        import xlsxwriter
+    except ModuleNotFoundError as exc:
+        raise SystemExit(XLSX_MISSING_DEPENDENCY) from exc
+    return xlsxwriter
 
 
-def xlsx_sheet_xml(table: ReviewTable) -> str:
+def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) -> None:
+    formats = xlsx_formats(workbook)
     query_cols = 3
-    value_start = query_cols + 1
+    value_start = query_cols
     value_end = value_start + len(table.variants) - 1
     ratio_start = value_end + 1
     ratio_end = ratio_start + len(table.variants) - 2
     total_cols = query_cols + len(table.variants) + max(0, len(table.variants) - 1)
-    last_col = col_name(total_cols)
-    rows: list[str] = []
-    merges: list[str] = []
+    last_col = total_cols - 1
 
     title = f"{table.scenario or 'benchmark'} {table.metric_title}"
-    rows.append(xlsx_row(1, [xlsx_cell("A1", title, 1)]))
-    merges.append(f"A1:{last_col}1")
+    write_or_merge(worksheet, 0, 0, 0, last_col, title, formats["title"])
 
     meta = (
         f"run={table.run_id}; scenario={table.scenario}; metric={table.metric_column}; "
         f"reference={table.reference}; ratio=direct variant/{table.reference}"
     )
-    rows.append(xlsx_row(2, [xlsx_cell("A2", meta, 2)]))
-    merges.append(f"A2:{last_col}2")
+    write_or_merge(worksheet, 1, 0, 1, last_col, meta, formats["meta"])
 
-    row_idx = 4
-    header_cells: list[str] = [xlsx_cell("A4", "dataset", 3)]
-    merges.append("A4:A5")
-    header_cells.append(xlsx_cell("B4", "query", 3))
-    merges.append("B4:B5")
-    header_cells.append(xlsx_cell("C4", "joins", 3))
-    merges.append("C4:C5")
-    header_cells.append(
-        xlsx_cell(
-            f"{col_name(value_start)}4",
-            f"median {table.metric_title.lower()} (ms)",
-            4,
-        )
+    write_or_merge(worksheet, 3, 0, 4, 0, "dataset", formats["header"])
+    write_or_merge(worksheet, 3, 1, 4, 1, "query", formats["header"])
+    write_or_merge(worksheet, 3, 2, 4, 2, "joins", formats["header"])
+    write_or_merge(
+        worksheet,
+        3,
+        value_start,
+        3,
+        value_end,
+        f"median {table.metric_title.lower()} (ms)",
+        formats["value_header"],
     )
-    merges.append(f"{col_name(value_start)}4:{col_name(value_end)}4")
     if ratio_start <= ratio_end:
-        header_cells.append(
-            xlsx_cell(
-                f"{col_name(ratio_start)}4",
-                f"ratio to {table.labels[table.reference]}",
-                5,
-            )
+        write_or_merge(
+            worksheet,
+            3,
+            ratio_start,
+            3,
+            ratio_end,
+            f"ratio to {table.labels[table.reference]}",
+            formats["ratio_header"],
         )
-        merges.append(f"{col_name(ratio_start)}4:{col_name(ratio_end)}4")
-    rows.append(xlsx_row(row_idx, header_cells))
 
-    row_idx = 5
-    subheader_cells: list[str] = []
-    for idx in range(1, query_cols + 1):
-        subheader_cells.append(xlsx_cell(f"{col_name(idx)}5", "", 3))
     col = value_start
     for variant in table.variants:
-        subheader_cells.append(xlsx_cell(f"{col_name(col)}5", table.labels[variant], 3))
+        write_cell(worksheet, 4, col, table.labels[variant], formats["header"])
         col += 1
     for variant in table.variants:
         if variant == table.reference:
             continue
-        subheader_cells.append(
-            xlsx_cell(
-                f"{col_name(col)}5",
-                f"{table.labels[variant]}/{table.labels[table.reference]}",
-                3,
-            )
+        write_cell(
+            worksheet,
+            4,
+            col,
+            f"{table.labels[variant]}/{table.labels[table.reference]}",
+            formats["header"],
         )
         col += 1
-    rows.append(xlsx_row(row_idx, subheader_cells))
 
-    row_idx = 6
+    row_idx = 5
     for table_row in table.rows:
-        cells: list[str] = [xlsx_cell(f"A{row_idx}", table_row.dataset, 6)]
-        cells.append(xlsx_cell(f"B{row_idx}", table_row.query_id, 6))
-        cells.append(xlsx_cell(f"C{row_idx}", table_row.join_size, 7, numeric=True))
-        col = 4
+        write_cell(worksheet, row_idx, 0, table_row.dataset, formats["text"])
+        write_cell(worksheet, row_idx, 1, table_row.query_id, formats["text"])
+        write_cell(worksheet, row_idx, 2, table_row.join_size, formats["numeric"])
+        col = value_start
         for variant in table.variants:
             cell = table_row.values[variant]
-            cells.append(
-                xlsx_cell(
-                    f"{col_name(col)}{row_idx}",
-                    cell.raw,
-                    xlsx_style_for_cell(cell),
-                    numeric=cell.raw is not None,
-                )
-            )
+            write_cell(worksheet, row_idx, col, cell.raw, formats[xlsx_format_key(cell)])
             col += 1
         for variant in table.variants:
             if variant == table.reference:
                 continue
             cell = table_row.ratios[variant]
-            cells.append(
-                xlsx_cell(
-                    f"{col_name(col)}{row_idx}",
-                    cell.raw,
-                    xlsx_style_for_cell(cell),
-                    numeric=cell.raw is not None,
-                )
-            )
+            write_cell(worksheet, row_idx, col, cell.raw, formats[xlsx_format_key(cell)])
             col += 1
-        rows.append(xlsx_row(row_idx, cells))
         row_idx += 1
 
-    total_cells = [xlsx_cell(f"A{row_idx}", "SUM", 15)]
-    if query_cols > 1:
-        merges.append(f"A{row_idx}:{col_name(query_cols)}{row_idx}")
-        for col in range(2, query_cols + 1):
-            total_cells.append(xlsx_cell(f"{col_name(col)}{row_idx}", "", 15))
+    write_or_merge(worksheet, row_idx, 0, row_idx, query_cols - 1, "SUM", formats["total_text"])
     col = value_start
     for variant in table.variants:
         cell = table.total_values[variant]
-        total_cells.append(
-            xlsx_cell(
-                f"{col_name(col)}{row_idx}",
-                cell.raw,
-                xlsx_style_for_cell(cell, total=True),
-                numeric=cell.raw is not None,
-            )
-        )
+        write_cell(worksheet, row_idx, col, cell.raw, formats[xlsx_format_key(cell, total=True)])
         col += 1
     for variant in table.variants:
         if variant == table.reference:
             continue
         cell = table.total_ratios[variant]
-        total_cells.append(
-            xlsx_cell(
-                f"{col_name(col)}{row_idx}",
-                cell.raw,
-                xlsx_style_for_cell(cell, total=True),
-                numeric=cell.raw is not None,
-            )
-        )
+        write_cell(worksheet, row_idx, col, cell.raw, formats[xlsx_format_key(cell, total=True)])
         col += 1
-    rows.append(xlsx_row(row_idx, total_cells))
 
-    width_entries = ['<col min="1" max="1" width="20" customWidth="1"/>']
-    width_entries.append('<col min="2" max="2" width="10" customWidth="1"/>')
-    width_entries.append('<col min="3" max="3" width="8" customWidth="1"/>')
-    if value_start <= value_end:
-        width_entries.append(f'<col min="{value_start}" max="{value_end}" width="15" customWidth="1"/>')
+    worksheet.freeze_panes(5, 0)
+    worksheet.autofilter(4, 0, row_idx, last_col)
+    worksheet.set_landscape()
+    worksheet.fit_to_pages(1, 0)
+    worksheet.set_margins(left=0.3, right=0.3, top=0.5, bottom=0.5)
+    worksheet.set_column(0, 0, 20)
+    worksheet.set_column(1, 1, 10)
+    worksheet.set_column(2, 2, 8)
+    worksheet.set_column(value_start, value_end, 15)
     if ratio_start <= ratio_end:
-        width_entries.append(f'<col min="{ratio_start}" max="{ratio_end}" width="13" customWidth="1"/>')
-
-    merge_xml = ""
-    if merges:
-        merge_xml = f'<mergeCells count="{len(merges)}">' + "".join(f'<mergeCell ref="{ref}"/>' for ref in merges) + "</mergeCells>"
-
-    return "\n".join(
-        [
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
-            '<sheetViews><sheetView workbookViewId="0"><pane ySplit="5" topLeftCell="A6" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>',
-            f"<cols>{''.join(width_entries)}</cols>",
-            f'<sheetData>{"".join(rows)}</sheetData>',
-            f'<autoFilter ref="A5:{last_col}{row_idx}"/>',
-            merge_xml,
-            '<pageMargins left="0.3" right="0.3" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>',
-            f'<pageSetup orientation="{xml_attr(XLSX_PAGE_ORIENTATION)}" fitToWidth="1" fitToHeight="0"/>',
-            "</worksheet>",
-        ]
-    )
-
-
-def xlsx_styles_xml() -> str:
-    fills = [
-        "FFFFFF",
-        "F3F4F6",
-        "E5E7EB",
-        "DBEAFE",
-        "F3F4F6",
-        "B7E1CD",
-        "D9EAD3",
-        "FFFFFF",
-        "FFF2CC",
-        "FCE5CD",
-        "F4CCCC",
-    ]
-
-    def fill(color: str) -> str:
-        return f'<fill><patternFill patternType="solid"><fgColor rgb="FF{color}"/><bgColor indexed="64"/></patternFill></fill>'
-
-    def xf(font_id: int, fill_id: int, border_id: int, align: str = "", num_fmt: int = 0) -> str:
-        attrs = f'numFmtId="{num_fmt}" fontId="{font_id}" fillId="{fill_id}" borderId="{border_id}" xfId="0"'
-        if num_fmt:
-            attrs += ' applyNumberFormat="1"'
-        if align:
-            return f'<xf {attrs} applyAlignment="1"><alignment {align}/></xf>'
-        return f"<xf {attrs}/>"
-
-    xfs = [
-        xf(0, 0, 0),  # 0 default
-        xf(1, 0, 0, 'horizontal="left" vertical="center"'),  # 1 title
-        xf(0, 0, 0, 'horizontal="left" vertical="center" wrapText="1"'),  # 2 meta
-        xf(2, 2, 1, 'horizontal="center" vertical="center" wrapText="1"'),  # 3 header
-        xf(2, 3, 1, 'horizontal="center" vertical="center" wrapText="1"'),  # 4 value group
-        xf(2, 4, 1, 'horizontal="center" vertical="center" wrapText="1"'),  # 5 ratio group
-        xf(0, 0, 1),  # 6 text
-        xf(0, 0, 1, 'horizontal="right" vertical="center"', 164),  # 7 numeric
-        xf(0, 5, 1),  # 8 missing
-        xf(0, 6, 1, 'horizontal="right" vertical="center"', 165),  # 9 ratio fast strong
-        xf(0, 7, 1, 'horizontal="right" vertical="center"', 165),  # 10 ratio fast
-        xf(0, 8, 1, 'horizontal="right" vertical="center"', 165),  # 11 ratio neutral
-        xf(0, 9, 1, 'horizontal="right" vertical="center"', 165),  # 12 ratio slow
-        xf(0, 10, 1, 'horizontal="right" vertical="center"', 165),  # 13 ratio slower
-        xf(0, 11, 1, 'horizontal="right" vertical="center"', 165),  # 14 ratio worst
-        xf(2, 0, 2),  # 15 total text
-        xf(2, 0, 2, 'horizontal="right" vertical="center"', 164),  # 16 total numeric
-        xf(2, 6, 2, 'horizontal="right" vertical="center"', 165),  # 17 total ratio fast strong
-        xf(2, 7, 2, 'horizontal="right" vertical="center"', 165),  # 18 total ratio fast
-        xf(2, 8, 2, 'horizontal="right" vertical="center"', 165),  # 19 total ratio neutral
-        xf(2, 9, 2, 'horizontal="right" vertical="center"', 165),  # 20 total ratio slow
-        xf(2, 10, 2, 'horizontal="right" vertical="center"', 165),  # 21 total ratio slower
-        xf(2, 11, 2, 'horizontal="right" vertical="center"', 165),  # 22 total ratio worst
-    ]
-    return "\n".join(
-        [
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-            '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
-            '<numFmts count="2"><numFmt numFmtId="164" formatCode="0.00"/><numFmt numFmtId="165" formatCode="0.00"/></numFmts>',
-            '<fonts count="3"><font><sz val="11"/><name val="Aptos"/></font><font><b/><sz val="14"/><name val="Aptos"/></font><font><b/><sz val="11"/><name val="Aptos"/></font></fonts>',
-            f'<fills count="{2 + len(fills)}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>{"".join(fill(c) for c in fills)}</fills>',
-            '<borders count="3"><border/><border><left style="thin"><color rgb="FFD1D5DB"/></left><right style="thin"><color rgb="FFD1D5DB"/></right><top style="thin"><color rgb="FFD1D5DB"/></top><bottom style="thin"><color rgb="FFD1D5DB"/></bottom></border><border><left style="thin"><color rgb="FF111827"/></left><right style="thin"><color rgb="FF111827"/></right><top style="medium"><color rgb="FF111827"/></top><bottom style="thin"><color rgb="FF111827"/></bottom></border></borders>',
-            '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>',
-            f'<cellXfs count="{len(xfs)}">{"".join(xfs)}</cellXfs>',
-            '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>',
-            "</styleSheet>",
-        ]
-    )
+        worksheet.set_column(ratio_start, ratio_end, 13)
 
 
 def write_review_workbook(path: Path, tables: list[ReviewTable]) -> None:
     if not tables:
         raise SystemExit("cannot write an empty workbook")
 
+    xlsxwriter = require_xlsxwriter()
+
     used_sheet_names: set[str] = set()
     sheet_names = [sheet_name(table.metric, used_sheet_names) for table in tables]
 
-    workbook_sheets = "".join(
-        f'<sheet name="{xml_attr(name)}" sheetId="{idx}" r:id="rId{idx}"/>'
-        for idx, name in enumerate(sheet_names, start=1)
-    )
-    workbook_rels = "".join(
-        f'<Relationship Id="rId{idx}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet{idx}.xml"/>'
-        for idx in range(1, len(tables) + 1)
-    )
-    workbook_rels += '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-    sheet_overrides = "".join(
-        f'<Override PartName="/xl/worksheets/sheet{idx}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-        for idx in range(1, len(tables) + 1)
-    )
-
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(
-            "[Content_Types].xml",
-            "\n".join(
-                [
-                    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>',
-                    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
-                    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
-                    '<Default Extension="xml" ContentType="application/xml"/>',
-                    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>',
-                    '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>',
-                    sheet_overrides,
-                    '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>',
-                    '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>',
-                    "</Types>",
-                ]
-            ),
-        )
-        zf.writestr(
-            "_rels/.rels",
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>',
-        )
-        zf.writestr(
-            "xl/workbook.xml",
-            f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>{workbook_sheets}</sheets></workbook>',
-        )
-        zf.writestr(
-            "xl/_rels/workbook.xml.rels",
-            f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{workbook_rels}</Relationships>',
-        )
-        zf.writestr("xl/styles.xml", xlsx_styles_xml())
-        zf.writestr(
-            "docProps/core.xml",
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>join_order_benchmark</dc:creator></cp:coreProperties>',
-        )
-        zf.writestr(
-            "docProps/app.xml",
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>join_order_benchmark</Application></Properties>',
-        )
-        for idx, table in enumerate(tables, start=1):
-            zf.writestr(f"xl/worksheets/sheet{idx}.xml", xlsx_sheet_xml(table))
+    workbook = xlsxwriter.Workbook(str(path))
+    try:
+        workbook.set_properties({"author": "join_order_benchmark"})
+        for table, name in zip(tables, sheet_names):
+            worksheet = workbook.add_worksheet(name)
+            write_review_worksheet(workbook, worksheet, table)
+    finally:
+        workbook.close()
 
 
 def default_output_name() -> str:
@@ -774,6 +662,8 @@ def write_review_tables(
     )
     if not selected_datasets:
         selected_datasets = sorted(rows_by_dataset)
+
+    require_xlsxwriter()
 
     out_dir = run_dir / "review_tables"
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -165,6 +165,8 @@ The workbook is the reviewer-facing attachment: it has frozen headers, grouped
 metric and ratio columns, number formats, a `SUM` row, and ratio colors.  The
 CSV files contain the same table values without workbook styling, so they are
 easy to inspect with text tools or import into other analysis scripts.
+The XLSX export uses optional `XlsxWriter`; benchmark prepare/run does not need
+it.
 
 Reviewer tables require `dp` in the selected variant list.  Ratios are direct
 `variant/dp` ratios.  Execution time is the primary result; planning time is a
