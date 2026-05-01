@@ -7,6 +7,33 @@ This directory contains built-in benchmark scenario definitions.
 `scenarios.toml` defines the built-in benchmark scopes: `main`, `extended`, and
 `full`.
 
+Think of it as a small manifest:
+
+- `[scenario.main]` starts the definition of a scenario named `main`.
+- Scalar fields under that table define the run protocol for that scenario.
+- Every `[[scenario.main.dataset]]` block appends one dataset entry to `main`.
+- Dataset entries may optionally restrict which variants they apply to or which
+  query join sizes are selected.
+
+Minimal shape:
+
+```toml
+[scenario.main]
+description = "Primary algorithm validation path on complete JOB and JOB-Complex."
+default_variants = ["dp", "geqo"]
+reps = 3
+statement_timeout_ms = 600000
+stabilize = "vacuum_freeze_analyze"
+variant_order_mode = "rotate"
+session_gucs = { join_collapse_limit = 100, max_parallel_workers_per_gather = 0 }
+
+[[scenario.main.dataset]]
+name = "job"
+
+[[scenario.main.dataset]]
+name = "job_complex"
+```
+
 Supported fields per scenario:
 
 - `description`
@@ -22,19 +49,43 @@ Supported fields per scenario:
   Per-statement timeout applied by the runner.
 - `stabilize`
   Database stabilization mode before the run.  `vacuum_freeze_analyze` means
-  the runner executes `VACUUM (FREEZE, ANALYZE)` on prepared benchmark tables
+  the runner executes `VACUUM FREEZE ANALYZE` on prepared benchmark tables
   before measurement so visibility-map and statistics state are refreshed.
 - `variant_order_mode`
   Variant execution order.  Use `rotate` for benchmark runs so each variant
   appears in different positions across query groups.
 - `session_gucs`
   Scenario-level session settings applied before variant-level settings.
-- `[[scenario.<name>.dataset]]`
-  Dataset entries selected by the scenario.  Entries may include `max_join`, a
-  per-entry `variants` subset, or `exclude_variants`.  Use `exclude_variants`
-  for "all selected variants except these"; for example,
-  `gpuqo_clique_small` runs non-`dp` variants fully while `dp` is limited to
-  `join_size <= 12`.
+
+Supported fields per dataset entry:
+
+- `name`
+  Dataset id.  It must be one of `python3 bench/bench.py list datasets`.
+- `max_join`
+  Optional maximum query join size for this entry.
+- `variants`
+  Optional allow-list.  The dataset entry runs only for selected variants that
+  are also present in this list.
+- `exclude_variants`
+  Optional deny-list.  The dataset entry runs for all selected variants except
+  these.  Do not set both `variants` and `exclude_variants` in the same entry.
+
+The duplicated `gpuqo_clique_small` entry is intentional:
+
+```toml
+[[scenario.extended.dataset]]
+name = "gpuqo_clique_small"
+exclude_variants = ["dp"]
+
+[[scenario.extended.dataset]]
+name = "gpuqo_clique_small"
+variants = ["dp"]
+max_join = 12
+```
+
+This means selected non-`dp` variants run the full clique workload, while `dp`
+runs only clique queries with `join_size <= 12`.  That guard keeps the dynamic
+programming baseline tractable on the dense clique workload.
 
 ## Variants
 

@@ -1,5 +1,5 @@
 [scenario.main]
-description = "Primary algorithm validation path on full JOB and JOB-Complex."
+description = "Primary algorithm validation path on complete JOB and JOB-Complex."
 default_variants = ["dp", "geqo"]
 reps = 3
 statement_timeout_ms = 600000

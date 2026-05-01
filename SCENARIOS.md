@@ -4,6 +4,8 @@ This document describes the built-in benchmark scenarios.  The top-level README
 keeps only the reviewer entry points.
 
 Scenario definitions are stored in [config/scenarios.toml](config/scenarios.toml).
+The TOML format and the `gpuqo_clique_small` `dp` guard are explained in
+[config/README.md](config/README.md).
 Dataset-level query counts and join sizes come from
 [meta/query_manifest.csv](meta/query_manifest.csv).
 
@@ -17,7 +19,7 @@ Dataset-level query counts and join sizes come from
 
 ## `main`
 
-`main` is the primary public validation path.  It runs the full IMDB-backed JOB
+`main` is the primary public validation path.  It runs the complete IMDB-backed JOB
 and JOB-Complex workloads:
 
 | Dataset | Queries | Join Size | Data |
@@ -34,11 +36,11 @@ small enough for iteration while still covering realistic join-order choices.
 
 | Dataset | Queries | Join Size | Data | Role |
 | --- | ---: | --- | --- | --- |
-| `sqlite_select5` | 732 | 4-64 | self-contained | high-width join stress converted from SQLite tests |
-| `gpuqo_chain_small` | 150 | 2-16 | self-contained | chain-shaped join graphs |
-| `gpuqo_clique_small` | 150 | 2-16 | self-contained | dense clique-shaped join graphs |
-| `gpuqo_star_small` | 150 | 2-16 | self-contained | star-shaped join graphs |
-| `gpuqo_snowflake_small` | 390 | 2-40 | self-contained | wider snowflake-shaped join graphs |
+| `sqlite_select5` | 732 | 4-64 | self-contained toy data | high-width join stress converted from SQLite sqllogictest |
+| `gpuqo_chain_small` | 150 | 2-16 | self-contained synthetic data | chain-shaped join graph stress |
+| `gpuqo_clique_small` | 150 | 2-16 | self-contained synthetic data | dense clique-shaped join graph stress |
+| `gpuqo_star_small` | 150 | 2-16 | self-contained synthetic data | star-shaped join graph stress |
+| `gpuqo_snowflake_small` | 390 | 2-40 | self-contained synthetic data | wider snowflake-shaped join graph stress |
 
 These extra workloads are adapted from existing upstream sources rather than
 invented locally.  They have small deterministic data and many wide joins, so

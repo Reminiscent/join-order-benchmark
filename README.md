@@ -18,13 +18,12 @@ documents how those tables were produced.
 
 | Review question | Evidence in this repository |
 | --- | --- |
-| What was tested first? | `main` is the primary validation scenario.  It runs the full JOB and JOB-Complex workloads. |
+| What was tested first? | `main` is the primary validation scenario.  It runs the complete JOB and JOB-Complex workloads. |
 | Which workloads are included? | [SCENARIOS.md](SCENARIOS.md) describes `main`, `extended`, and `full`; [DATASETS.md](DATASETS.md) records source repositories, related papers, query counts, join sizes, and data requirements. |
-| Which algorithm variants were compared? | A submitted run should state its `--variants` list.  Baselines and other experiment-specific variants are described below. |
-| What benchmark parameters were used? | The public run defaults are listed below.  The exact resolved values for a submitted run are in its `run.json`. |
-| How were timings collected? | The measurement protocol below uses PostgreSQL `EXPLAIN ANALYZE` JSON output with planning and execution reported separately. |
-| How were the uploaded tables produced? | [tools/render_review_tables.py](tools/render_review_tables.py) renders styled Excel workbooks with execution-time and planning-time sheets from `summary.csv`. |
-| Where are the results? | Results are expected to be uploaded separately, for example as Excel/PDF tables.  [OUTPUTS.md](OUTPUTS.md) describes every generated artifact and reviewer-table format. |
+| Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an explicit `--variants` list and variants file. |
+| How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) maps the public commands to the runner steps: prepare data, stabilize tables, warm up, measure, and write artifacts. |
+| What benchmark parameters were used? | Most PostgreSQL settings remain whatever the server was started with.  The harness applies only the session-level benchmark controls listed below; exact resolved values for a submitted run are in its `run.json`. |
+| How were timings collected? | PostgreSQL `EXPLAIN ANALYZE` JSON output is used because it reports planning and execution phase times separately.  Node-level timing is disabled with `TIMING OFF`. |
 
 The primary execution metric is `execution_ms_median`.  Planning time is a
 separate diagnostic metric, so planner overhead does not get mixed into
@@ -32,17 +31,22 @@ execution behavior.
 
 ## Public Run Defaults
 
-The built-in scenarios currently use the same run protocol unless the command
-line overrides it:
+The built-in scenarios use the same public protocol unless the command line
+overrides it.  The goal is to make join-order behavior comparable while keeping
+execution-side noise low.  Cluster-level settings such as `shared_buffers` are
+not changed by the harness.
 
-| Parameter | Default |
-| --- | --- |
-| measured repetitions | `3` |
-| statement timeout | `600000 ms` |
-| warmup | `1` discarded warmup pass per query group |
-| stabilization | runs `VACUUM (FREEZE, ANALYZE)` on prepared benchmark tables before measurement |
-| variant order | rotated per query group |
-| session settings | `join_collapse_limit=100`, `max_parallel_workers_per_gather=0`, `work_mem=1GB`, `effective_cache_size=8GB` |
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| measured repetitions | `3` | compute per-query medians without making public runs too long |
+| statement timeout | `600000 ms` | bound pathological plans and record them as timeouts |
+| warmup | `1` discarded warmup pass per query group | reduce first-run effects before recorded repetitions |
+| stabilization | `vacuum_freeze_analyze` | run `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT` before measurement |
+| variant order | `rotate` | avoid always giving the same variant the same position in a query group |
+| `join_collapse_limit` | `100` | allow the join-order algorithm under test to see wide join search spaces |
+| `max_parallel_workers_per_gather` | `0` | reduce execution-time noise from parallel workers |
+| `work_mem` | `1GB` | avoid memory spill differences dominating join-order comparisons |
+| `effective_cache_size` | `8GB` | keep costing assumptions stable across public runs |
 
 Variant sets are experiment-specific.  A submitted result should state the
 selected variants explicitly, and the exact definitions should come from the
@@ -83,7 +87,7 @@ resume behavior, and useful overrides.
 ## Scenarios
 
 Scenarios are the public workload layers.  `main` is the first-line validation
-run and contains the full JOB and JOB-Complex workloads.  The exact `main`,
+run and contains the complete JOB and JOB-Complex workloads.  The exact `main`,
 `extended`, and `full` definitions are documented in [SCENARIOS.md](SCENARIOS.md).
 
 ## Variants
@@ -109,6 +113,10 @@ phase times under:
 EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)
 ```
 
+`TIMING OFF` disables per-plan-node timing while PostgreSQL still reports
+top-level planning and execution summary times.  The detailed rationale is in
+[BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
+
 By default, the runner performs one discarded warmup pass per query group before
 that query group's measured repetitions.  Warmup executions are not recorded in
 `raw.csv` or `summary.csv`.
@@ -128,9 +136,10 @@ completed run into per-query tables suitable for community attachments.  Each
 workbook contains an execution-time sheet and a planning-time sheet generated
 from the same `summary.csv`.
 
-The generated workbook groups metric columns and ratio columns, colors ratio
-cells relative to `dp`, and includes a `SUM` row.  CSV
-companions are written next to the workbook for plain-text inspection.
+The generated workbook requires `dp` in the selected variant list, groups metric
+columns and ratio columns, colors ratio cells relative to `dp`, and includes a
+`SUM` row.  CSV companions are written next to the workbook for plain-text
+inspection.
 
 Example:
 
@@ -153,6 +162,7 @@ audited.  The full layout is documented in [OUTPUTS.md](OUTPUTS.md).
 
 ## More Detail
 
+- [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md): how the benchmark scripts execute a run
 - [REPRODUCE.md](REPRODUCE.md): full reproduction workflow and CLI overrides
 - [SCENARIOS.md](SCENARIOS.md): scenario layers
 - [DATASETS.md](DATASETS.md): workload coverage, IMDB CSV setup, and query counts

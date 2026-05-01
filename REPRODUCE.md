@@ -3,6 +3,10 @@
 This document describes the public reproduction flow for this benchmark
 repository.
 
+For the runner internals behind these commands, including stabilization,
+warmup, variant rotation, and timing collection, see
+[BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
+
 ## 1. Requirements
 
 You need:
@@ -185,6 +189,9 @@ Current default measurement protocol:
 - warmup executions are not recorded in `raw.csv` or `summary.csv`
 - measured `statement_timeout` rows are recorded as `status=timeout`
 - non-timeout errors are recorded as `status=error`
+
+The reason for using `EXPLAIN ANALYZE` JSON, and the tradeoff around
+`TIMING OFF`, are documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
 
 Recommended result columns:
 

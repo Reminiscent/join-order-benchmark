@@ -15,7 +15,9 @@ Included subsets:
 - `gpuqo_snowflake_small`
   390 queries, join size 2 to 40, snowflake-shaped join graphs.
 
-These workloads are self-contained and are useful when you want controlled synthetic join graph structure instead of IMDB-derived real data.
+These workloads are self-contained and load small synthetic data.  They are
+mainly useful for controlled join-search and planning-time stress on generated
+join graph shapes, not for realistic execution-time claims.
 
 ## Files
 
