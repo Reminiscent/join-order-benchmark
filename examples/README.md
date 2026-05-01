@@ -1,13 +1,14 @@
 # Examples
 
-`variants.toml` is the default variant file used by `bench.py`.  It keeps the
-portable `dp` and `geqo` baselines separate from other experiment-specific
+The portable `dp` and `geqo` baseline variants are built into `bench.py`.
+`variants.toml` is an example extra variant file for experiment-specific
 variants such as GOO or hybrid search settings.
 
-The built-in scenarios default to the portable baselines.  Pass `--variants`
-when a submitted benchmark compares additional algorithms.
+The built-in scenarios default to the portable baselines.  Pass
+`--variants-file` plus `--variants` when a submitted benchmark compares
+additional algorithms.
 
-Use a custom variant file with:
+Use an extra variant file with:
 
 ```bash
 python3 bench/bench.py list variants --variants-file path/to/variants.toml

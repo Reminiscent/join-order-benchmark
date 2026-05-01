@@ -1,18 +1,4 @@
-# Portable baseline variants.
-
-[[variant]]
-name = "dp"
-label = "Dynamic Programming"
-session_gucs = { geqo_threshold = 100 }
-optional_session_gucs = { enable_goo_join_search = "off" }
-
-[[variant]]
-name = "geqo"
-label = "GEQO"
-session_gucs = { geqo_threshold = 2 }
-optional_session_gucs = { enable_goo_join_search = "off" }
-
-# Other experiment-specific variants used by patched PostgreSQL builds.
+# Example extra variants used by patched PostgreSQL builds.
 
 [[variant]]
 name = "goo_cost"

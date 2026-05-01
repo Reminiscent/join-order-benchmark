@@ -75,7 +75,7 @@ query-count metadata.
 
 ## Query Manifest
 
-The global query manifest is [meta/query_manifest.csv](meta/query_manifest.csv).
+The global query manifest is [tools/query_manifest.csv](tools/query_manifest.csv).
 Refresh and verify it with:
 
 ```bash

@@ -1,6 +1,7 @@
-# Meta
+# Tools
 
-This directory contains tracked derived metadata used by the benchmark runner.
+This directory contains supporting files for the benchmark runner: the tracked
+query manifest and small helper commands.
 
 ## Files
 
@@ -9,6 +10,15 @@ This directory contains tracked derived metadata used by the benchmark runner.
 - global machine-readable manifest for all benchmark queries
 - used for dataset discovery and join-size filtering
 - checked into git as part of the benchmark artifact
+
+`build_query_manifest.py`
+
+- rebuilds `query_manifest.csv` from the workload SQL files
+- verifies expected dataset counts and join-size ranges
+
+`render_review_tables.py`
+
+- renders reviewer-facing XLSX and CSV tables from `outputs/<run_id>/summary.csv`
 
 Schema:
 

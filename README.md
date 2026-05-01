@@ -2,7 +2,7 @@
 
 This repository is a PostgreSQL benchmark artifact for evaluating join order
 optimization algorithms.  It keeps the workloads, scenario definitions, variant
-parameters, and runner together so reviewer-facing benchmark results can be
+settings, and runner together so reviewer-facing benchmark results can be
 explained and reproduced from one place.
 
 The intended use is narrow: when proposing or reviewing a new join order
@@ -20,35 +20,40 @@ documents how those tables were produced.
 | --- | --- |
 | What was tested first? | `main` is the primary validation scenario.  It runs the complete JOB and JOB-Complex workloads. |
 | Which broader workloads are included? | `extended` adds small-data planning/search-space stress workloads; `full` adds the heavier CEB IMDB 3k subset.  See [SCENARIOS.md](SCENARIOS.md) and [DATASETS.md](DATASETS.md). |
-| Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an explicit `--variants` list and variants file. |
+| Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an optional `--variants-file` and explicit `--variants` list. |
 | How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) maps the public commands to the runner steps: prepare data, stabilize tables, warm up, measure, and write artifacts. |
-| What run settings were used? | The public run protocol and PostgreSQL settings are listed below.  `run.json` records the exact scenario, variants, built-in dataset restrictions, repetition count, timeout, warmup policy, and session GUCs used by a run. |
-| How were timings collected? | PostgreSQL `EXPLAIN ANALYZE` JSON output is used to separate planning and execution time.  `TIMING OFF` reduces node-level timing overhead; caveats are in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md). |
+| How exactly was it tested? | The fixed public run protocol and PostgreSQL settings are summarized below.  `run.json` records the exact scenario, variants, built-in dataset restrictions, repetition count, timeout, warmup policy, and session GUCs used by a run. |
+| How were timings collected? | PostgreSQL `EXPLAIN ANALYZE` JSON output is used to separate planning and execution time.  Measurement caveats are in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md). |
 
 The primary execution metric is `execution_ms_median`.  Planning time is a
 separate diagnostic metric, so planner overhead does not get mixed into
 execution behavior.
 
-## Public Run Settings
+## Public Test Protocol
 
-There are two kinds of settings:
+This section summarizes how the public benchmark is run.  Most values here are
+fixed by the built-in scenario and runner rather than exposed as command-line
+parameters.  The main user choices are the scenario, the variants, and the
+optional `statement_timeout` guardrail.
 
-- **Run protocol settings** are benchmark-harness behavior: how many repetitions
+There are two parts:
+
+- **Run protocol** is benchmark-harness behavior: how many repetitions
   are measured, how warmup works, how timeouts are recorded, and how variants
   are ordered.
 - **PostgreSQL settings** are GUCs or server settings that affect planning and
   execution.  Session-level GUCs are applied by the harness; restart-required
   settings must be configured before the run.
 
-### Run Protocol
+### Fixed Run Protocol
 
-| Setting | Public default | Purpose |
+| Behavior | Public value | Purpose |
 | --- | --- | --- |
 | measured repetitions | `3` | compute per-query medians without making public runs too long |
-| statement timeout | `600000 ms` | bound pathological plans and record them as timeouts |
 | warmup | `1` discarded warmup pass per query group | reduce first-run effects before recorded repetitions |
 | stabilization | `vacuum_freeze_analyze` | run `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT` before measurement |
 | variant order | `rotate` | avoid always giving the same variant the same position in a query group |
+| warmup timeout handling | skip later measured repetitions for the same `(dataset, query, variant)` | avoid re-running a query/variant that already hit the guardrail during warmup |
 
 ### PostgreSQL Settings
 
@@ -62,6 +67,7 @@ least 16 GiB of RAM without tuning memory values per machine.
 | `max_parallel_workers_per_gather` | `0` | harness session GUC | reduce execution-time noise from parallel workers |
 | `work_mem` | `1GB` | harness session GUC | reduce spill noise for single-query serial benchmark runs |
 | `effective_cache_size` | `8GB` | harness session GUC | keep planner cache-size assumptions stable for the 16 GiB baseline |
+| `statement_timeout` | `600000 ms` by default; override with `--statement-timeout-ms` when needed | guard against very bad plans consuming the run for too long |
 
 If following the public setup, set `shared_buffers` outside the harness and
 restart PostgreSQL:
@@ -74,6 +80,10 @@ The session GUCs are applied by the harness for every warmup and measured
 execution and are recorded in `run.json`.  See
 [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the memory-setting rationale and
 caveats.
+
+`statement_timeout` is a guardrail rather than a join-order algorithm setting.
+If it is changed for a slower or faster machine, publish the value together with
+the result tables; the resolved value is also recorded in `run.json`.
 
 ## Minimal Reproduction
 
@@ -89,15 +99,15 @@ python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-Run a patch-specific algorithm by passing the submitted variants file and an
-explicit variant set:
+Run a patch-specific algorithm by passing an extra variants file and an explicit
+variant set:
 
 ```bash
 python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
 ```
 
 See [REPRODUCE.md](REPRODUCE.md) for the full command flow, connection flags,
-resume behavior, and useful overrides.
+resume behavior, and supported CLI options.
 
 ## Artifacts
 
@@ -116,9 +126,8 @@ Top-level folders are split by responsibility:
 | Path | Purpose |
 | --- | --- |
 | `bench/` | benchmark CLI and harness modules for prepare, run, timing collection, and result summarization |
-| `examples/` | default and example variant definitions, including portable `dp` and `geqo` baselines |
-| `meta/` | generated query manifest used for dataset metadata such as join size and query count |
-| `tools/` | helper scripts for refreshing metadata and rendering reviewer-facing tables |
+| `examples/` | example extra variant definitions for patch-specific algorithms |
+| `tools/` | query manifest plus helper scripts for refreshing metadata and rendering reviewer-facing tables |
 | `tests/` | unit tests for built-in scenario resolution, run behavior, and reviewer table rendering |
 | `join-order-benchmark/` | local JOB workload adaptation |
 | `JOB-Complex/` | local JOB-Complex workload adaptation |
@@ -131,9 +140,10 @@ Top-level folders are split by responsibility:
 ## More Detail
 
 - [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md): how the benchmark scripts execute a run
-- [REPRODUCE.md](REPRODUCE.md): full reproduction workflow and CLI overrides
+- [REPRODUCE.md](REPRODUCE.md): full reproduction workflow and CLI options
 - [SCENARIOS.md](SCENARIOS.md): scenario layers
 - [DATASETS.md](DATASETS.md): workload coverage, IMDB CSV setup, and query counts
 - [OUTPUTS.md](OUTPUTS.md): run artifacts and reviewer tables
-- [examples/README.md](examples/README.md): variant file fields
+- [examples/README.md](examples/README.md): extra variant file fields
 - [bench/README.md](bench/README.md): benchmark harness module layout
+- [tools/README.md](tools/README.md): query manifest and helper commands

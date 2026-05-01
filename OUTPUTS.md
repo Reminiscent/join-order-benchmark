@@ -72,10 +72,10 @@ Important fields:
 | `scenario` | Scenario name, such as `main`, `extended`, or `full`. |
 | `scenario_description` | Description from the built-in scenario definition. |
 | `protocol.reps` | Number of measured repetitions per query and variant. |
-| `protocol.statement_timeout_ms` | Per-statement timeout used during measurement. |
+| `protocol.statement_timeout_ms` | Per-statement guardrail timeout used during measurement. |
 | `protocol.stabilize` | Stabilization mode, for example `vacuum_freeze_analyze`. |
 | `protocol.warmup_runs` | Number of discarded warmup passes per query group. |
-| `protocol.skip_measured_after_warmup_timeout` | Whether measured repetitions are skipped after a warmup timeout for the same `(dataset, query, variant)`. |
+| `protocol.warmup_timeout_policy` | Fixed behavior after a warmup timeout; currently later measured repetitions for the same `(dataset, query, variant)` are recorded as skipped timeout rows. |
 | `protocol.warmup_scope` | Current warmup scope; normally `query_group_discarded_pass`. |
 | `protocol.measurement_lane` | The PostgreSQL measurement command shape, currently `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`. |
 | `protocol.session_gucs` | Scenario-level session GUCs applied before variant settings. |

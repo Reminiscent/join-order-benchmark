@@ -60,7 +60,7 @@ def build_session_prelude(
     statement_timeout_ms: Optional[int],
 ) -> list[str]:
     lines = ["RESET ALL;"]
-    if statement_timeout_ms is not None and statement_timeout_ms > 0:
+    if statement_timeout_ms is not None:
         lines.append(f"SET statement_timeout = {statement_timeout_ms};")
     lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in scenario_session_gucs)
     lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in variant.session_gucs)

@@ -10,8 +10,7 @@ from typing import Any, Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MANIFEST_PATH = REPO_ROOT / "meta" / "query_manifest.csv"
-DEFAULT_VARIANTS_CONFIG_PATH = REPO_ROOT / "examples" / "variants.toml"
+MANIFEST_PATH = REPO_ROOT / "tools" / "query_manifest.csv"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 
 SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")

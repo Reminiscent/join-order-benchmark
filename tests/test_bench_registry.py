@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_common import DatasetSpec, Scenario
-from bench_config import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
+from bench_registry import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
 
 
-class BenchConfigTests(unittest.TestCase):
+class BenchRegistryTests(unittest.TestCase):
     def make_scenario(self) -> Scenario:
         return Scenario(
             name="full",
@@ -31,11 +31,10 @@ class BenchConfigTests(unittest.TestCase):
             ),
         )
 
-    def test_load_variants_uses_default_example_file(self) -> None:
+    def test_load_variants_uses_built_in_baselines(self) -> None:
         variants = load_variants()
 
-        self.assertIn("dp", variants)
-        self.assertIn("hybrid_search", variants)
+        self.assertEqual(tuple(variants), ("dp", "geqo"))
 
     def test_load_scenarios_uses_built_in_definitions(self) -> None:
         scenarios = load_scenarios()
@@ -47,7 +46,7 @@ class BenchConfigTests(unittest.TestCase):
         )
         self.assertEqual(scenarios["full"].datasets[-1].dataset, "imdb_ceb_3k")
 
-    def test_load_variants_accepts_custom_file(self) -> None:
+    def test_load_variants_accepts_extra_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "variants.toml"
             path.write_text(
@@ -61,7 +60,7 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
 
             variants = load_variants(path)
 
-        self.assertEqual(tuple(variants), ("my_algo",))
+        self.assertEqual(tuple(variants), ("dp", "geqo", "my_algo"))
         self.assertEqual(variants["my_algo"].label, "My Algorithm")
 
     def test_prepare_dataset_resolution_ignores_variant_specific_splits(self) -> None:

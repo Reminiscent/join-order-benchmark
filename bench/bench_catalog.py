@@ -47,7 +47,7 @@ SELECT5_HEADER_RE = re.compile(r"^--\s*query\s+(\d+)\s+\((.*?)\)\s*$", flags=re.
 @functools.lru_cache(maxsize=1)
 def load_manifest_by_dataset() -> dict[str, tuple[QueryMeta, ...]]:
     if not MANIFEST_PATH.is_file():
-        die(f"missing manifest: {MANIFEST_PATH} (run tools/build_query_manifest.py --verify --summary)")
+        die(f"missing manifest: {MANIFEST_PATH} (run python3 tools/build_query_manifest.py --verify --summary)")
 
     out: dict[str, list[QueryMeta]] = {}
     with MANIFEST_PATH.open(newline="") as f:

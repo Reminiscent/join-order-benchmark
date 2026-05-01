@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from bench_catalog import PREPARE_MARKERS, dataset_prepare_scripts
-from bench_config import resolve_prepare_dataset_runs
+from bench_registry import resolve_prepare_dataset_runs
 from bench_common import ConnOpts, Scenario, die, psql_cmd, psql_file, psql_sql, run_cmd, sql_identifier, sql_literal
 
 

@@ -111,17 +111,13 @@ class RunScenarioTests(unittest.TestCase):
         return json.loads((run_dir / "run.json").read_text())
 
     def test_warmup_timeout_is_skipped_even_with_fail_on_error(self) -> None:
-        metrics = bench_exec.RunMetrics(planning_ms=1.0, execution_ms=2.0, total_ms=3.0, plan_total_cost=4.0)
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
             self.patch_run_environment(
                 stack,
                 outputs_dir,
-                [
-                    bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
-                    metrics,
-                ],
+                bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
             )
 
             bench_run.run_scenario(
@@ -135,7 +131,6 @@ class RunScenarioTests(unittest.TestCase):
                 stabilize="none",
                 variant_order_mode="fixed",
                 warmup_runs=1,
-                skip_measured_after_warmup_timeout=False,
                 resume_run_id=None,
                 tag="",
                 fail_on_error=True,
@@ -145,7 +140,8 @@ class RunScenarioTests(unittest.TestCase):
             run_context = self.read_run_context(run_dir)
             raw_rows = self.read_raw_rows(run_dir)
             self.assertEqual(len(raw_rows), 1)
-            self.assertEqual(raw_rows[0]["status"], "ok")
+            self.assertEqual(raw_rows[0]["status"], "timeout")
+            self.assertTrue(raw_rows[0]["error"].startswith("skipped measured run after warmup timeout:"))
             self.assertEqual(run_context["warmup_failures"][0]["category"], "statement_timeout")
             self.assertNotIn("termination", run_context)
 
@@ -170,7 +166,6 @@ class RunScenarioTests(unittest.TestCase):
                 stabilize="none",
                 variant_order_mode="fixed",
                 warmup_runs=0,
-                skip_measured_after_warmup_timeout=False,
                 resume_run_id=None,
                 tag="",
                 fail_on_error=True,
@@ -203,7 +198,6 @@ class RunScenarioTests(unittest.TestCase):
                     stabilize="none",
                     variant_order_mode="fixed",
                     warmup_runs=1,
-                    skip_measured_after_warmup_timeout=False,
                     resume_run_id=None,
                     tag="",
                     fail_on_error=True,
@@ -239,7 +233,6 @@ class RunScenarioTests(unittest.TestCase):
                     stabilize="none",
                     variant_order_mode="fixed",
                     warmup_runs=0,
-                    skip_measured_after_warmup_timeout=False,
                     resume_run_id=None,
                     tag="",
                     fail_on_error=True,
@@ -251,7 +244,7 @@ class RunScenarioTests(unittest.TestCase):
             self.assertEqual(len(raw_rows), 1)
             self.assertEqual(raw_rows[0]["status"], "error")
 
-    def test_skip_measured_after_warmup_timeout_records_timeout_rows_without_rerun(self) -> None:
+    def test_warmup_timeout_records_measured_timeout_rows_without_rerun(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
@@ -272,7 +265,6 @@ class RunScenarioTests(unittest.TestCase):
                 stabilize="none",
                 variant_order_mode="fixed",
                 warmup_runs=1,
-                skip_measured_after_warmup_timeout=True,
                 resume_run_id=None,
                 tag="",
                 fail_on_error=True,
@@ -290,7 +282,7 @@ class RunScenarioTests(unittest.TestCase):
                     for row in raw_rows
                 )
             )
-            self.assertTrue(run_context["protocol"]["skip_measured_after_warmup_timeout"])
+            self.assertEqual(run_context["protocol"]["warmup_timeout_policy"], "skip_later_measured_repetitions")
 
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")
@@ -321,7 +313,6 @@ class RunScenarioTests(unittest.TestCase):
                 stabilize="none",
                 variant_order_mode="fixed",
                 warmup_runs=1,
-                skip_measured_after_warmup_timeout=True,
                 resume_run_id=None,
                 tag="",
                 fail_on_error=True,
@@ -368,7 +359,6 @@ class RunScenarioTests(unittest.TestCase):
                         stabilize="none",
                         variant_order_mode="fixed",
                         warmup_runs=0,
-                        skip_measured_after_warmup_timeout=True,
                         resume_run_id=None,
                         tag="resume",
                         fail_on_error=True,
@@ -401,7 +391,6 @@ class RunScenarioTests(unittest.TestCase):
                     stabilize="none",
                     variant_order_mode="fixed",
                     warmup_runs=0,
-                    skip_measured_after_warmup_timeout=True,
                     resume_run_id=run_dir.name,
                     tag="resume",
                     fail_on_error=True,
@@ -441,7 +430,6 @@ class RunScenarioTests(unittest.TestCase):
                         stabilize="none",
                         variant_order_mode="fixed",
                         warmup_runs=1,
-                        skip_measured_after_warmup_timeout=True,
                         resume_run_id=None,
                         tag="resume-warmup",
                         fail_on_error=True,
@@ -478,7 +466,6 @@ class RunScenarioTests(unittest.TestCase):
                     stabilize="none",
                     variant_order_mode="fixed",
                     warmup_runs=1,
-                    skip_measured_after_warmup_timeout=True,
                     resume_run_id=run_dir.name,
                     tag="resume-warmup",
                     fail_on_error=True,

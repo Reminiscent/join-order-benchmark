@@ -196,8 +196,8 @@ def verify(entries: list[QueryEntry]) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Build meta/query_manifest.csv for join-order workloads.")
-    ap.add_argument("--out", default=str(REPO_ROOT / "meta" / "query_manifest.csv"))
+    ap = argparse.ArgumentParser(description="Build tools/query_manifest.csv for join-order workloads.")
+    ap.add_argument("--out", default=str(REPO_ROOT / "tools" / "query_manifest.csv"))
     ap.add_argument("--summary", action="store_true", help="Print dataset-level join_size summary.")
     ap.add_argument("--verify", action="store_true", help="Run strict verification checks (counts/ranges).")
     args = ap.parse_args()

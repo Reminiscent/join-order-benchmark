@@ -10,7 +10,6 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from bench_catalog import available_datasets, dataset_db_name
 from bench_common import (
-    DEFAULT_VARIANTS_CONFIG_PATH,
     DatasetSpec,
     ResolvedDatasetRun,
     Scenario,
@@ -30,6 +29,20 @@ DEFAULT_SESSION_GUCS = (
     ("max_parallel_workers_per_gather", 0),
     ("work_mem", "1GB"),
     ("effective_cache_size", "8GB"),
+)
+BUILT_IN_VARIANTS = (
+    Variant(
+        name="dp",
+        label="Dynamic Programming",
+        session_gucs=(("geqo_threshold", 100),),
+        optional_session_gucs=(("enable_goo_join_search", "off"),),
+    ),
+    Variant(
+        name="geqo",
+        label="GEQO",
+        session_gucs=(("geqo_threshold", 2),),
+        optional_session_gucs=(("enable_goo_join_search", "off"),),
+    ),
 )
 
 MAIN_DATASETS = (
@@ -67,15 +80,18 @@ def built_in_scenario(
 
 
 def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
-    variants_path = Path(path) if path is not None else DEFAULT_VARIANTS_CONFIG_PATH
+    out = {variant.name: variant for variant in BUILT_IN_VARIANTS}
+    if path is None:
+        return out
+
+    variants_path = Path(path)
     if not variants_path.is_file():
-        die(f"missing variants config: {variants_path}")
+        die(f"missing variants file: {variants_path}")
     data = tomllib.loads(variants_path.read_text())
     raw_variants = data.get("variant")
     if not isinstance(raw_variants, list) or not raw_variants:
         die(f"{variants_path} must define at least one [[variant]] entry")
 
-    out: dict[str, Variant] = {}
     for entry in raw_variants:
         if not isinstance(entry, dict):
             die(f"bad [[variant]] entry in {variants_path}")
@@ -83,7 +99,7 @@ def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
         if not name:
             die(f"variant in {variants_path} is missing name")
         if name in out:
-            die(f"duplicate variant name '{name}' in {variants_path}")
+            die(f"variant file cannot redefine built-in or duplicate variant '{name}'")
         label = str(entry.get("label", name)).strip() or name
         raw_gucs = entry.get("session_gucs", {})
         if not isinstance(raw_gucs, dict):

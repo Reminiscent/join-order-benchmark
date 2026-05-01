@@ -198,7 +198,6 @@ def validate_resume_context(
     statement_timeout_ms: int,
     stabilize: str,
     warmup_runs: int,
-    skip_measured_after_warmup_timeout: bool,
     variant_names: tuple[str, ...],
     resolved_runs: list[ResolvedDatasetRun],
 ) -> None:
@@ -214,7 +213,7 @@ def validate_resume_context(
         "statement_timeout_ms": statement_timeout_ms,
         "stabilize": stabilize,
         "warmup_runs": warmup_runs,
-        "skip_measured_after_warmup_timeout": skip_measured_after_warmup_timeout,
+        "warmup_timeout_policy": "skip_later_measured_repetitions",
     }
     for key, expected in expected_protocol.items():
         if protocol.get(key) != expected:
@@ -249,7 +248,6 @@ def flush_outputs(
     statement_timeout_ms: int,
     stabilize: str,
     warmup_runs: int,
-    skip_measured_after_warmup_timeout: bool,
     effective_variant_contexts: list[dict[str, Any]],
     query_counts: list[dict[str, Any]],
     warmup_failures: list[dict[str, Any]],
@@ -278,7 +276,6 @@ def flush_outputs(
         statement_timeout_ms=statement_timeout_ms,
         stabilize=stabilize,
         warmup_runs=warmup_runs,
-        skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
     )
@@ -307,17 +304,16 @@ def run_scenario(
     stabilize: str,
     variant_order_mode: str,
     warmup_runs: int,
-    skip_measured_after_warmup_timeout: bool,
     resume_run_id: Optional[str],
     tag: str,
     fail_on_error: bool,
 ) -> None:
     if reps <= 0:
-        die(f"--reps must be >= 1 (got {reps})")
+        die(f"scenario repetitions must be >= 1 (got {reps})")
     if statement_timeout_ms < 0:
-        die(f"--statement-timeout-ms must be >= 0 (got {statement_timeout_ms})")
+        die(f"statement timeout must be >= 0 (got {statement_timeout_ms})")
     if warmup_runs < 0:
-        die(f"--warmup-runs must be >= 0 (got {warmup_runs})")
+        die(f"warmup runs must be >= 0 (got {warmup_runs})")
     if variant_order_mode not in {"fixed", "rotate"}:
         die(f"scenario defines unsupported variant order mode: {variant_order_mode}")
 
@@ -406,7 +402,6 @@ def run_scenario(
             statement_timeout_ms=statement_timeout_ms,
             stabilize=stabilize,
             warmup_runs=warmup_runs,
-            skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
             variant_names=variant_names,
             resolved_runs=resolved_runs,
         )
@@ -441,7 +436,6 @@ def run_scenario(
         statement_timeout_ms=statement_timeout_ms,
         stabilize=stabilize,
         warmup_runs=warmup_runs,
-        skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
         warmup_failures=warmup_failures,
@@ -529,7 +523,6 @@ def run_scenario(
                     statement_timeout_ms=statement_timeout_ms,
                     stabilize=stabilize,
                     warmup_runs=warmup_runs,
-                    skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
                     effective_variant_contexts=effective_variant_contexts,
                     query_counts=query_counts,
                     warmup_failures=warmup_failures,
@@ -562,7 +555,7 @@ def run_scenario(
                     plan_total_cost = -1.0
                     execution_measurement_mode = "explain_analyze_summary_timing_off_json"
 
-                    if skip_measured_after_warmup_timeout and key in warmup_timeout_keys:
+                    if key in warmup_timeout_keys:
                         status = "timeout"
                         err = warmup_timeout_skip_error(
                             "ERROR: canceling statement due to statement timeout"
@@ -635,7 +628,6 @@ def run_scenario(
                     statement_timeout_ms=statement_timeout_ms,
                     stabilize=stabilize,
                     warmup_runs=warmup_runs,
-                    skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
                     effective_variant_contexts=effective_variant_contexts,
                     query_counts=query_counts,
                     warmup_failures=warmup_failures,
@@ -656,7 +648,6 @@ def run_scenario(
         statement_timeout_ms=statement_timeout_ms,
         stabilize=stabilize,
         warmup_runs=warmup_runs,
-        skip_measured_after_warmup_timeout=skip_measured_after_warmup_timeout,
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
         warmup_failures=warmup_failures,

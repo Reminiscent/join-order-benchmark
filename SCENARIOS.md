@@ -6,7 +6,7 @@ keeps only the reviewer entry points.
 Scenarios are built into the benchmark harness.  They are intentionally not a
 user-facing configuration layer; choose one by name with `bench.py prepare` and
 `bench.py run`.  Dataset-level query counts and join sizes come from
-[meta/query_manifest.csv](meta/query_manifest.csv).
+[tools/query_manifest.csv](tools/query_manifest.csv).
 
 ## Built-In Scenario Layers
 

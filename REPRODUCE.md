@@ -39,9 +39,8 @@ Optional connection flags supported by every command:
 
 ## 2. Variants
 
-The default variant file is [examples/variants.toml](examples/variants.toml).
-It contains portable baselines plus other example algorithms used by this
-repository's experiments.
+The portable baseline variants `dp` and `geqo` are built in.  Extra variants are
+only needed when testing a patch-specific algorithm or parameter set.
 
 Inspect the active variants:
 
@@ -49,21 +48,21 @@ Inspect the active variants:
 python3 bench/bench.py list variants
 ```
 
-Use a custom variant file when testing a different algorithm or parameter set:
+Inspect built-ins plus extra example variants:
 
 ```bash
-python3 bench/bench.py list variants --variants-file path/to/variants.toml
+python3 bench/bench.py list variants --variants-file examples/variants.toml
+```
+
+Use an extra variant file when testing a different algorithm or parameter set:
+
+```bash
 python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
 ```
 
-The built-in scenario defaults are the portable `dp` and `geqo` baselines.  Use
-an explicit `--variants` list for any patch-specific algorithm.
-
-```bash
-python3 bench/bench.py run main --variants dp,geqo
-```
-
-Variant fields are documented in [examples/README.md](examples/README.md).
+If `--variants` is omitted, the selected scenario uses the built-in `dp` and
+`geqo` baselines.  Variant fields are documented in
+[examples/README.md](examples/README.md).
 
 ## 3. Data Setup
 
@@ -113,7 +112,7 @@ Run with portable baselines:
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-Run with an explicit variant set:
+Run with an extra variant set:
 
 ```bash
 python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
@@ -184,7 +183,7 @@ rules are documented in [OUTPUTS.md](OUTPUTS.md).
 
 ## 9. Measurement Semantics
 
-Current default measurement protocol:
+Current fixed measurement protocol:
 
 - planning and execution metrics come from
   `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`
@@ -209,14 +208,20 @@ Recommended result columns:
 - `plan_total_cost_median`
   Planner-side diagnostic signal, not a runtime substitute.
 
-## 10. Run Protocol And PostgreSQL Settings
+## 10. Fixed Run Protocol And PostgreSQL Settings
 
-Public run settings are split into two groups:
+The selected scenario fixes the public benchmark protocol.  These values are
+part of how the test is done; they are not ordinary CLI parameters:
 
-- run protocol settings, such as repetitions, warmup, timeout handling, and
-  variant rotation
-- PostgreSQL settings, such as session GUCs and restart-required cluster
-  settings
+- `3` measured repetitions per query and variant
+- one discarded warmup pass per query group
+- `vacuum_freeze_analyze` stabilization before measurement
+- rotated variant order across query groups and repetitions
+- skipped measured rows after a warmup `statement_timeout` for the same
+  `(dataset, query, variant)`
+
+PostgreSQL settings are split into session-level GUCs and restart-required
+cluster settings.
 
 The harness applies the following session-level PostgreSQL settings and records
 them in `run.json`, either as protocol fields or as session GUCs:
@@ -249,31 +254,30 @@ is a planner costing assumption, not memory allocated by PostgreSQL.
 The same split is summarized in [README.md](README.md), and the memory-setting
 rationale is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
 
-## 11. Useful Overrides
+## 11. CLI Options
 
-The following overrides are available on `run`:
+These are the supported `run` options after choosing a scenario.  They select
+what to compare, where to resume, and how to label the local run.  They do not
+change the fixed benchmark protocol, except for the per-statement timeout
+guardrail.
 
-- `--variants-file`
-- `--variants`
-- `--resume-run-id`
-- `--reps`
-- `--statement-timeout-ms`
-- `--stabilize`
-- `--warmup-runs`
-- `--skip-measured-after-warmup-timeout`
-- `--no-skip-measured-after-warmup-timeout`
-- `--tag`
-- `--fail-on-error`
+| Option | Use |
+| --- | --- |
+| `--variants-file` | add patch-specific variants from a TOML file |
+| `--variants` | choose the variants and display/order them explicitly |
+| `--resume-run-id` | continue an interrupted run from a safe boundary |
+| `--statement-timeout-ms` | adjust the guardrail timeout for very slow or very fast machines |
+| `--tag` | record a local build or patch label in `run.json` |
+| `--fail-on-error` | exit non-zero on non-timeout query errors |
 
-`--warmup-runs` means discarded warmup pass(es) per query group before that
-query group's measured repetitions.  Use `--warmup-runs 0` to disable the
-default warmup phase.
+`--statement-timeout-ms` is not an algorithm knob.  It only limits how long a
+single bad plan can occupy the run.  If it differs from the default
+`600000 ms`, include that value with the published result tables; the run also
+records it in `run.json`.
 
-`--skip-measured-after-warmup-timeout` is enabled by default.  If an exact
-`(dataset, query, variant)` hits `statement_timeout` during warmup, the harness
-records later measured repetitions for that same combination as skipped timeout
-rows instead of re-running them.  Use `--no-skip-measured-after-warmup-timeout`
-to re-run measured repetitions even after a warmup timeout.
+If an exact `(dataset, query, variant)` hits `statement_timeout` during warmup,
+the harness records later measured repetitions for that same combination as
+skipped timeout rows instead of re-running them.
 
 `--resume-run-id` resumes an existing `outputs/<run_id>/` directory from the
 next unfinished safe group boundary.  The harness checkpoints after complete

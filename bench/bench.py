@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from bench_common import ConnOpts, die
-from bench_config import (
+from bench_registry import (
     load_scenarios,
     load_variants,
     print_datasets,
@@ -17,6 +17,9 @@ from bench_config import (
 )
 from bench_prepare import prepare_scenario
 from bench_run import run_scenario
+
+
+DEFAULT_WARMUP_RUNS = 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -35,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--variants-file",
             type=Path,
             default=None,
-            help="variant TOML file (default: examples/variants.toml)",
+            help="extra variant TOML file for patch-specific algorithms",
         )
 
     ap_list = sub.add_parser("list", help="List scenarios, variants, or datasets.")
@@ -61,40 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="resume an existing outputs/<run_id> directory from the next unfinished group boundary",
     )
-    ap_run.add_argument("--reps", type=int, default=None, help="override scenario repetitions")
     ap_run.add_argument(
         "--statement-timeout-ms",
         type=int,
         default=None,
-        help="override scenario statement timeout in milliseconds",
-    )
-    ap_run.add_argument(
-        "--stabilize",
-        choices=["vacuum_freeze_analyze", "none"],
-        default=None,
-        help="override scenario stabilize mode",
-    )
-    ap_run.add_argument(
-        "--warmup-runs",
-        type=int,
-        default=1,
-        help="run this many discarded warmup pass(es) per query group before its measured repetitions",
-    )
-    ap_run.add_argument(
-        "--skip-measured-after-warmup-timeout",
-        action="store_true",
-        default=True,
-        help=(
-            "after a warmup statement_timeout on an exact (dataset, query, variant), "
-            "record measured repetitions for that same combination as skipped timeouts "
-            "instead of re-running them"
-        ),
-    )
-    ap_run.add_argument(
-        "--no-skip-measured-after-warmup-timeout",
-        action="store_false",
-        dest="skip_measured_after_warmup_timeout",
-        help="re-run measured repetitions even when the exact combination already timed out during warmup",
+        help="override the per-statement guardrail timeout in milliseconds",
     )
     ap_run.add_argument("--tag", default="", help="optional local tag for this run or the build under test")
     ap_run.add_argument(
@@ -154,16 +128,15 @@ def main() -> None:
             variant_names,
             resolved_runs,
             conn=conn,
-            reps=args.reps if args.reps is not None else scenario.reps,
+            reps=scenario.reps,
             statement_timeout_ms=(
                 args.statement_timeout_ms
                 if args.statement_timeout_ms is not None
                 else scenario.statement_timeout_ms
             ),
-            stabilize=args.stabilize if args.stabilize is not None else scenario.stabilize,
+            stabilize=scenario.stabilize,
             variant_order_mode=scenario.variant_order_mode,
-            warmup_runs=args.warmup_runs,
-            skip_measured_after_warmup_timeout=args.skip_measured_after_warmup_timeout,
+            warmup_runs=DEFAULT_WARMUP_RUNS,
             resume_run_id=args.resume_run_id,
             tag=args.tag,
             fail_on_error=args.fail_on_error,

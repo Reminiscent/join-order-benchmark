@@ -13,7 +13,7 @@ python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-Use a submitted variants file when comparing a patch-specific algorithm:
+Use an extra variants file when comparing a patch-specific algorithm:
 
 ```bash
 python3 bench/bench.py run main \
@@ -36,8 +36,8 @@ small workloads, load local SQL files.
 `bench.py run <scenario>` performs these steps:
 
 1. Read the selected built-in scenario.
-2. Read variant definitions from [examples/variants.toml](examples/variants.toml)
-   or the submitted `--variants-file`.
+2. Load built-in `dp` and `geqo` variants, plus any extra variants from the
+   submitted `--variants-file`.
 3. Resolve the explicit `--variants` list, or use the scenario's
    `default_variants`.
 4. Apply built-in dataset restrictions, such as the `gpuqo_clique_small` `dp`
@@ -97,7 +97,8 @@ References:
 
 ## Session Setup
 
-Each warmup and measured execution starts with a fresh session prelude:
+Each warmup and measured execution starts with a fresh session prelude.  With
+the default timeout it is:
 
 ```sql
 RESET ALL;
@@ -115,6 +116,13 @@ PostgreSQL build exposes that GUC.
 
 The harness does not change restart-required cluster settings.  Those must be
 configured outside the benchmark if a submitted run depends on them.
+
+`statement_timeout` is the one public protocol value that may be adjusted from
+the CLI with `--statement-timeout-ms`.  It exists to stop very bad plans from
+occupying the benchmark for too long; it is not intended to tune algorithm
+quality.  If the default `600000 ms` is changed because of machine speed or
+campaign time budget, record the override with the published results.  The
+resolved value is written to `run.json`.
 
 ## Stabilization
 
@@ -134,7 +142,7 @@ if it is not allowed for the current connection.
 
 ## Warmup And Measurement Order
 
-The default public run uses one discarded warmup pass per query group:
+The fixed public run uses one discarded warmup pass per query group:
 
 ```text
 query 1: warm up all selected variants, then measure rep 1..N
@@ -148,10 +156,9 @@ The built-in variant order is `rotate`, which rotates variant order across query
 groups and repetitions.  This avoids always measuring the same variant first or
 last for every query.
 
-If a warmup execution hits `statement_timeout`, the default behavior is to skip
-later measured repetitions for the exact `(dataset, query, variant)` tuple and
-record timeout rows.  Use `--no-skip-measured-after-warmup-timeout` only when
-you intentionally want measured repetitions to re-run after a warmup timeout.
+If a warmup execution hits `statement_timeout`, later measured repetitions for
+the exact `(dataset, query, variant)` tuple are recorded as skipped timeout rows
+instead of re-running the same timeout-prone statement.
 
 ## Timing Collection
 
