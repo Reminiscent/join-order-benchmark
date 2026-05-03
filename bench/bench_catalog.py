@@ -248,14 +248,11 @@ def resolve_prepare_dataset_runs(
 
 def print_scenarios(scenarios: dict[str, Scenario]) -> None:
     print("Scenarios")
-    print("name\tdefault_variants\tdatasets\tdescription")
+    print("name\tdatasets\tdescription")
     for name, scenario in scenarios.items():
         dataset_names = list(dict.fromkeys(spec.dataset for spec in scenario.datasets))
         datasets = ", ".join(dataset_names)
-        print(
-            f"{name}\t{','.join(scenario.default_variants)}\t"
-            f"{datasets}\t{scenario.description}"
-        )
+        print(f"{name}\t{datasets}\t{scenario.description}")
     print()
 
 

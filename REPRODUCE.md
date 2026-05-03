@@ -25,28 +25,19 @@ Following the public `shared_buffers=4GB` setup also requires either superuser
 access for `ALTER SYSTEM` or direct access to the PostgreSQL server
 configuration, followed by a server restart.
 
-`prepare` and `run` both connect to PostgreSQL.  The harness does not define
-its own connection defaults: `--host`, `--port`, and `--user` are optional
-pass-through flags to `psql`.  If they are omitted, they are not passed.
+`prepare` and `run` both connect to PostgreSQL.  If a local PostgreSQL build is
+reachable through normal libpq defaults, no connection flags are needed.
 
-Use the same connection flags for both phases when the server is not reachable
-through the native PostgreSQL defaults:
+When the server uses a TCP host, non-default port, or different database role,
+pass the same connection flags to both phases:
 
-| Flag | If omitted |
-| --- | --- |
-| `--host` | libpq uses its normal local connection behavior, usually a Unix-domain socket on Unix-like systems |
-| `--port` | libpq uses PostgreSQL's default port, usually `5432`, unless overridden by the environment |
-| `--user` | libpq uses the current operating-system user, unless `PGUSER` is set |
+```bash
+python3 bench/bench.py prepare main --host 127.0.0.1 --port 5433 --user postgres --csv-dir "$(pwd)/data/imdb_csv"
+python3 bench/bench.py run main --host 127.0.0.1 --port 5433 --user postgres --variants dp,geqo
+```
 
-This matches a direct local PostgreSQL source build started with default
-connection settings.  If your server listens on TCP, a non-default port, or a
-different database role, pass the corresponding values explicitly.
-
-If you prefer one shared connection configuration, use libpq's native
-environment variables or service files, for example `PGHOST`, `PGPORT`,
-`PGUSER`, `PGPASSWORD`, `PGSSLMODE`, or `PGSERVICE`.  The harness still owns the
-database name because it switches between the `postgres` maintenance database
-and the benchmark databases during prepare and run.
+Libpq environment variables such as `PGHOST`, `PGPORT`, `PGUSER`, or
+`PGSERVICE` work too.  The harness still selects the database names itself.
 
 ## 2. Variants
 

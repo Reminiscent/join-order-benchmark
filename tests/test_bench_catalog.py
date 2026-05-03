@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -54,6 +56,20 @@ class BenchCatalogTests(unittest.TestCase):
             ["job", "job_complex"],
         )
         self.assertEqual(scenarios["full"].datasets[-1].dataset, "imdb_ceb_3k")
+
+    def test_print_scenarios_omits_default_variants(self) -> None:
+        out = io.StringIO()
+
+        with redirect_stdout(out):
+            bench_catalog.print_scenarios({"full": self.make_scenario()})
+
+        self.assertEqual(
+            out.getvalue(),
+            "Scenarios\n"
+            "name\tdatasets\tdescription\n"
+            "full\tgpuqo_clique_small, sqlite_select5\ttest scenario\n"
+            "\n",
+        )
 
     def test_load_variants_accepts_extra_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
