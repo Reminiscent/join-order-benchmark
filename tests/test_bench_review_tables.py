@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
-from bench_review_tables import write_review_tables
+from bench_review_tables import ReviewTableCell, ratio_css_class, write_review_tables, xlsx_format_key
 
 
 HAS_XLSXWRITER = importlib.util.find_spec("xlsxwriter") is not None
@@ -72,14 +72,38 @@ class BenchReviewTablesTests(unittest.TestCase):
 
         self.assertIn("execution", workbook_xml)
         self.assertIn("planning", workbook_xml)
-        self.assertIn("B7E1CD", styles_xml)
-        self.assertIn("F4CCCC", styles_xml)
+        self.assertIn("6AA84F", styles_xml)
+        self.assertIn("CC0000", styles_xml)
         self.assertIn("dataset,query,join_size", execution_csv)
         self.assertIn("2a", execution_csv)
         self.assertIn("job_complex,1a", execution_csv)
         self.assertLess(execution_csv.index("2a"), execution_csv.index("10a"))
         self.assertIn("SUM", planning_csv)
         self.assertIn("my_algo_to_dp", planning_csv)
+
+    def test_ratio_color_thresholds_match_documented_scale(self) -> None:
+        cases = [
+            (None, "missing"),
+            (0.49, "ratio ratio-fast-strong"),
+            (0.50, "ratio ratio-fast"),
+            (0.79, "ratio ratio-fast"),
+            (0.80, "ratio ratio-neutral"),
+            (1.19, "ratio ratio-neutral"),
+            (1.20, "ratio ratio-slow"),
+            (1.99, "ratio ratio-slow"),
+            (2.00, "ratio ratio-slower"),
+            (9.99, "ratio ratio-slower"),
+            (10.00, "ratio ratio-worst"),
+        ]
+        for value, expected in cases:
+            self.assertEqual(ratio_css_class(value), expected)
+
+    def test_xlsx_format_key_keeps_slow_and_slower_buckets_distinct(self) -> None:
+        slow = ReviewTableCell(text="1.5", raw=1.5, css_class="ratio ratio-slow")
+        slower = ReviewTableCell(text="3", raw=3.0, css_class="ratio ratio-slower")
+
+        self.assertEqual(xlsx_format_key(slow), "ratio_slow")
+        self.assertEqual(xlsx_format_key(slower), "ratio_slower")
 
 
 if __name__ == "__main__":

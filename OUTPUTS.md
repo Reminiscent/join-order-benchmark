@@ -218,12 +218,12 @@ The workbook colors ratio cells to make large changes visible:
 
 | Ratio | Meaning | Color group |
 | ---: | --- | --- |
-| `< 0.75` | much faster than `dp` | strong green |
-| `< 0.95` | faster than `dp` | green |
-| `0.95` through `1.05` | roughly equivalent | neutral |
-| `> 1.05` through `1.25` | slower than `dp` | yellow |
-| `> 1.25` through `2.00` | much slower than `dp` | orange |
-| `> 2.00` | severe slowdown | red |
+| `< 0.50` | much faster than `dp` | dark green |
+| `0.50` through `< 0.80` | faster than `dp` | green |
+| `0.80` through `< 1.20` | roughly equivalent | neutral |
+| `1.20` through `< 2.00` | slower than `dp` | light red |
+| `2.00` through `< 10.00` | much slower than `dp` | red |
+| `>= 10.00` | severe slowdown | dark red |
 
 Missing metric values are left blank and styled as missing cells.  The `SUM`
 ratio for a variant is computed only over rows where both that variant and `dp`

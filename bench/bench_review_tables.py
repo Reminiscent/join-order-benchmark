@@ -171,15 +171,15 @@ def format_ratio(value: float | None) -> str:
 def ratio_css_class(value: float | None) -> str:
     if value is None:
         return "missing"
-    if value < 0.75:
+    if value < 0.5:
         return "ratio ratio-fast-strong"
-    if value < 0.95:
+    if value < 0.8:
         return "ratio ratio-fast"
-    if value <= 1.05:
+    if value < 1.2:
         return "ratio ratio-neutral"
-    if value <= 1.25:
+    if value < 2.0:
         return "ratio ratio-slow"
-    if value <= 2.0:
+    if value < 10.0:
         return "ratio ratio-slower"
     return "ratio ratio-worst"
 
@@ -409,10 +409,10 @@ def xlsx_format_key(cell: ReviewTableCell, *, total: bool = False) -> str:
         return "total_ratio_fast" if total else "ratio_fast"
     if "ratio-neutral" in css_class:
         return "total_ratio_neutral" if total else "ratio_neutral"
-    if "ratio-slow" in css_class:
-        return "total_ratio_slow" if total else "ratio_slow"
     if "ratio-slower" in css_class:
         return "total_ratio_slower" if total else "ratio_slower"
+    if "ratio-slow" in css_class:
+        return "total_ratio_slow" if total else "ratio_slow"
     if "ratio-worst" in css_class:
         return "total_ratio_worst" if total else "ratio_worst"
     if "numeric" in css_class:
@@ -454,20 +454,20 @@ def xlsx_formats(workbook: Any) -> dict[str, Any]:
         "text": workbook.add_format(border),
         "numeric": workbook.add_format(numeric),
         "missing": workbook.add_format({**border, "bg_color": "#F3F4F6"}),
-        "ratio_fast_strong": workbook.add_format({**numeric, "bg_color": "#B7E1CD"}),
+        "ratio_fast_strong": workbook.add_format({**numeric, "bg_color": "#6AA84F", "font_color": "#FFFFFF"}),
         "ratio_fast": workbook.add_format({**numeric, "bg_color": "#D9EAD3"}),
         "ratio_neutral": workbook.add_format({**numeric, "bg_color": "#FFFFFF"}),
-        "ratio_slow": workbook.add_format({**numeric, "bg_color": "#FFF2CC"}),
-        "ratio_slower": workbook.add_format({**numeric, "bg_color": "#FCE5CD"}),
-        "ratio_worst": workbook.add_format({**numeric, "bg_color": "#F4CCCC"}),
+        "ratio_slow": workbook.add_format({**numeric, "bg_color": "#F4CCCC"}),
+        "ratio_slower": workbook.add_format({**numeric, "bg_color": "#EA9999"}),
+        "ratio_worst": workbook.add_format({**numeric, "bg_color": "#CC0000", "font_color": "#FFFFFF"}),
         "total_text": workbook.add_format(total_base),
         "total_numeric": workbook.add_format(total_numeric),
-        "total_ratio_fast_strong": workbook.add_format({**total_numeric, "bg_color": "#B7E1CD"}),
+        "total_ratio_fast_strong": workbook.add_format({**total_numeric, "bg_color": "#6AA84F", "font_color": "#FFFFFF"}),
         "total_ratio_fast": workbook.add_format({**total_numeric, "bg_color": "#D9EAD3"}),
         "total_ratio_neutral": workbook.add_format({**total_numeric, "bg_color": "#FFFFFF"}),
-        "total_ratio_slow": workbook.add_format({**total_numeric, "bg_color": "#FFF2CC"}),
-        "total_ratio_slower": workbook.add_format({**total_numeric, "bg_color": "#FCE5CD"}),
-        "total_ratio_worst": workbook.add_format({**total_numeric, "bg_color": "#F4CCCC"}),
+        "total_ratio_slow": workbook.add_format({**total_numeric, "bg_color": "#F4CCCC"}),
+        "total_ratio_slower": workbook.add_format({**total_numeric, "bg_color": "#EA9999"}),
+        "total_ratio_worst": workbook.add_format({**total_numeric, "bg_color": "#CC0000", "font_color": "#FFFFFF"}),
     }
 
 
