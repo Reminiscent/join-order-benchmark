@@ -96,8 +96,8 @@ class BenchReviewTablesTests(unittest.TestCase):
             self.assertEqual(ratio_style_key(value), expected)
 
     def test_xlsx_format_key_keeps_slow_and_slower_buckets_distinct(self) -> None:
-        slow = ReviewTableCell(text="1.5", raw=1.5, style_key="ratio_slow")
-        slower = ReviewTableCell(text="3", raw=3.0, style_key="ratio_slower")
+        slow = ReviewTableCell(raw=1.5, style_key="ratio_slow")
+        slower = ReviewTableCell(raw=3.0, style_key="ratio_slower")
 
         self.assertEqual(xlsx_format_key(slow), "ratio_slow")
         self.assertEqual(xlsx_format_key(slower), "ratio_slower")

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from bench_common import parse_csv_list, safe_artifact_name
+from bench_common import parse_csv_list
 
 
 METRICS = {
@@ -51,7 +51,6 @@ class SummaryRow:
 
 @dataclass(frozen=True)
 class ReviewTableCell:
-    text: str
     raw: float | None = None
     style_key: str = ""
 
@@ -152,22 +151,6 @@ def query_family(query_id: str) -> str:
     return match.group(1) if match else query_id
 
 
-def format_ms(value: float | None) -> str:
-    if value is None:
-        return ""
-    if abs(value) >= 100000:
-        return f"{value:.0f}"
-    if abs(value) >= 1000:
-        return f"{value:.1f}".rstrip("0").rstrip(".")
-    return f"{value:.2f}".rstrip("0").rstrip(".")
-
-
-def format_ratio(value: float | None) -> str:
-    if value is None:
-        return ""
-    return f"{value:.2f}".rstrip("0").rstrip(".")
-
-
 def ratio_style_key(value: float | None) -> str:
     if value is None:
         return "missing"
@@ -204,17 +187,6 @@ def first_row_for_query(dataset_rows: dict[str, dict[str, SummaryRow]], query_id
         if row is not None:
             return row
     return None
-
-
-def dedupe_preserve(items: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for item in items:
-        if item in seen:
-            continue
-        seen.add(item)
-        out.append(item)
-    return out
 
 
 def resolve_combined_variant_order(
@@ -302,7 +274,7 @@ def build_review_table(
             for variant in variants:
                 value = metric_value(dataset_rows.get(variant, {}).get(query_id), metric_column)
                 style_key = "numeric" if value is not None else "missing"
-                values[variant] = ReviewTableCell(text=format_ms(value), raw=value, style_key=style_key)
+                values[variant] = ReviewTableCell(raw=value, style_key=style_key)
 
             reference_value = values[reference].raw
             ratios: dict[str, ReviewTableCell] = {}
@@ -310,7 +282,7 @@ def build_review_table(
                 if variant == reference:
                     continue
                 ratio = ratio_to_reference(values[variant].raw, reference_value)
-                ratios[variant] = ReviewTableCell(text=format_ratio(ratio), raw=ratio, style_key=ratio_style_key(ratio))
+                ratios[variant] = ReviewTableCell(raw=ratio, style_key=ratio_style_key(ratio))
 
             family = query_family(query_id)
             rows.append(
@@ -332,7 +304,7 @@ def build_review_table(
     total_values: dict[str, ReviewTableCell] = {}
     for variant in variants:
         total = sum(row.values[variant].raw or 0.0 for row in rows if row.values[variant].raw is not None)
-        total_values[variant] = ReviewTableCell(text=format_ms(total), raw=total, style_key="numeric")
+        total_values[variant] = ReviewTableCell(raw=total, style_key="numeric")
 
     total_ratios: dict[str, ReviewTableCell] = {}
     for variant in variants:
@@ -346,7 +318,7 @@ def build_review_table(
         variant_total = sum(row.values[variant].raw or 0.0 for row in comparable_rows)
         reference_total = sum(row.values[reference].raw or 0.0 for row in comparable_rows)
         ratio = ratio_to_reference(variant_total, reference_total)
-        total_ratios[variant] = ReviewTableCell(text=format_ratio(ratio), raw=ratio, style_key=ratio_style_key(ratio))
+        total_ratios[variant] = ReviewTableCell(raw=ratio, style_key=ratio_style_key(ratio))
 
     return ReviewTable(
         run_id=str(run_context.get("run_id", "")),
@@ -602,10 +574,6 @@ def write_review_workbook(path: Path, tables: list[ReviewTable]) -> None:
         workbook.close()
 
 
-def default_output_name() -> str:
-    return safe_artifact_name("review")
-
-
 def write_review_tables(
     *,
     run_dir: Path,
@@ -621,12 +589,12 @@ def write_review_tables(
 
     run_context = json.loads(run_json.read_text())
     rows_by_dataset, query_order = load_summary_rows(summary_csv)
-    selected_datasets = datasets or dedupe_preserve(
-        [
+    selected_datasets = datasets or list(
+        dict.fromkeys(
             str(entry["dataset"])
             for entry in run_context.get("datasets", [])
             if isinstance(entry, dict) and entry.get("dataset") in rows_by_dataset
-        ]
+        )
     )
     if not selected_datasets:
         selected_datasets = sorted(rows_by_dataset)
@@ -644,6 +612,6 @@ def write_review_tables(
             variants_csv=variants_csv,
         )
         tables.append(table)
-    workbook_path = run_dir / f"{default_output_name()}.xlsx"
+    workbook_path = run_dir / "review.xlsx"
     write_review_workbook(workbook_path, tables)
     return [workbook_path]

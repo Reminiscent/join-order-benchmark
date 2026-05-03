@@ -117,55 +117,9 @@ def run_scenario(
             )
         )
 
-    run_groups = build_run_groups(prepared_runs)
-
     # Stage 4: write run.json before executing groups so the output directory
     # immediately records the requested scenario, datasets, and variants.
-    flush_outputs(
-        out_dir=out_dir,
-        run_id=run_id,
-        scenario=scenario,
-        resolved_runs=resolved_runs,
-        state=state,
-        tag=tag,
-        statement_timeout_ms=statement_timeout_ms,
-        effective_variant_contexts=effective_variant_contexts,
-        dataset_contexts=dataset_contexts,
-    )
-
-    # Stage 5: execute warmup and measured groups.  Each group is one query plus
-    # all selected variants for one warmup pass or measured repetition.
-    for group in run_groups:
-        if group.phase == "warmup":
-            state.termination = execute_warmup_group(
-                scenario=scenario,
-                spec=group.spec,
-                query=group.query,
-                stmt=group.stmt,
-                query_idx=group.query_idx,
-                warmup_pass=group.pass_index,
-                entry_variants=group.entry_variants,
-                conn=conn,
-                statement_timeout_ms=statement_timeout_ms,
-                warmup_failures=state.warmup_failures,
-                warmup_timeout_keys=state.warmup_timeout_keys,
-            )
-        else:
-            state.termination = execute_measured_group(
-                scenario=scenario,
-                spec=group.spec,
-                query=group.query,
-                stmt=group.stmt,
-                query_idx=group.query_idx,
-                rep=group.pass_index,
-                entry_variants=group.entry_variants,
-                conn=conn,
-                statement_timeout_ms=statement_timeout_ms,
-                warmup_timeout_keys=state.warmup_timeout_keys,
-                raw_rows=state.raw_rows,
-                summary_acc=state.summary_acc,
-            )
-
+    def write_current_artifacts() -> None:
         flush_outputs(
             out_dir=out_dir,
             run_id=run_id,
@@ -177,6 +131,56 @@ def run_scenario(
             effective_variant_contexts=effective_variant_contexts,
             dataset_contexts=dataset_contexts,
         )
+
+    write_current_artifacts()
+
+    # Stage 5: execute warmup and measured groups.  Each group is one query plus
+    # all selected variants for one warmup pass or measured repetition.
+    for prepared in prepared_runs:
+        for query_idx, (query, stmt) in enumerate(prepared.query_plans):
+            for warmup_pass in range(1, WARMUP_RUNS + 1):
+                state.termination = execute_warmup_group(
+                    scenario=scenario,
+                    spec=prepared.spec,
+                    query=query,
+                    stmt=stmt,
+                    query_idx=query_idx,
+                    warmup_pass=warmup_pass,
+                    entry_variants=prepared.entry_variants,
+                    conn=conn,
+                    statement_timeout_ms=statement_timeout_ms,
+                    warmup_failures=state.warmup_failures,
+                    warmup_timeout_keys=state.warmup_timeout_keys,
+                )
+                write_current_artifacts()
+                if state.termination is not None:
+                    break
+
+            if state.termination is not None:
+                break
+
+            for rep in range(1, MEASURED_REPS + 1):
+                state.termination = execute_measured_group(
+                    scenario=scenario,
+                    spec=prepared.spec,
+                    query=query,
+                    stmt=stmt,
+                    query_idx=query_idx,
+                    rep=rep,
+                    entry_variants=prepared.entry_variants,
+                    conn=conn,
+                    statement_timeout_ms=statement_timeout_ms,
+                    warmup_timeout_keys=state.warmup_timeout_keys,
+                    raw_rows=state.raw_rows,
+                    summary_acc=state.summary_acc,
+                )
+                write_current_artifacts()
+                if state.termination is not None:
+                    break
+
+            if state.termination is not None:
+                break
+
         if state.termination is not None:
             break
 
@@ -193,19 +197,6 @@ class RunState:
     warmup_failures: list[dict[str, Any]] = field(default_factory=list)
     warmup_timeout_keys: set[tuple[str, str, str]] = field(default_factory=set)
     termination: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class RunGroup:
-    """One warmup or measured group in run order."""
-
-    phase: str
-    spec: ResolvedDatasetRun
-    query: QueryMeta
-    stmt: str
-    query_idx: int
-    pass_index: int
-    entry_variants: list[Variant]
 
 
 @dataclass(frozen=True)
@@ -485,39 +476,6 @@ def rotate_variants(variants: list[Variant], offset: int) -> list[Variant]:
     if normalized == 0:
         return list(variants)
     return list(variants[normalized:]) + list(variants[:normalized])
-
-
-def build_run_groups(prepared_runs: list[PreparedRunWork]) -> list[RunGroup]:
-    """Return the linear sequence of warmup and measured work."""
-
-    groups: list[RunGroup] = []
-    for prepared in prepared_runs:
-        for query_idx, (query, stmt) in enumerate(prepared.query_plans):
-            for warmup_pass in range(1, WARMUP_RUNS + 1):
-                groups.append(
-                    RunGroup(
-                        phase="warmup",
-                        spec=prepared.spec,
-                        query=query,
-                        stmt=stmt,
-                        query_idx=query_idx,
-                        pass_index=warmup_pass,
-                        entry_variants=prepared.entry_variants,
-                    )
-                )
-            for rep in range(1, MEASURED_REPS + 1):
-                groups.append(
-                    RunGroup(
-                        phase="measured",
-                        spec=prepared.spec,
-                        query=query,
-                        stmt=stmt,
-                        query_idx=query_idx,
-                        pass_index=rep,
-                        entry_variants=prepared.entry_variants,
-                    )
-                )
-    return groups
 
 
 def flush_outputs(
