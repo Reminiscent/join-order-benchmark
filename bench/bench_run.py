@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
@@ -93,26 +94,21 @@ def run_scenario(
         for name in variant_names
     ]
 
-    # Stage 2: initialize the mutable run state.  These structures mirror the
-    # durable artifacts and are rebuilt from disk when resuming.
+    # Stage 2: initialize the run state.  Resume state is loaded as one unit so
+    # artifact-rebuild details do not interrupt the main execution path.
     print(f"[run] scenario={scenario.name}")
     print(f"[run] variants={','.join(variant_names)}")
     print(f"[run] warmup_passes={WARMUP_RUNS} measured_reps={MEASURED_REPS}")
     print(f"[run] outputs={out_dir}")
 
-    raw_rows: list[dict[str, str]] = []
-    summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+    state = RunState()
     query_counts: list[dict[str, Any]] = []
     stabilized_dbs: set[str] = set()
     prepared_runs: list[dict[str, Any]] = []
-    warmup_failures: list[dict[str, Any]] = []
-    warmup_timeout_keys: set[tuple[str, str, str]] = set()
-    completed_warmup_groups: set[tuple[int, str, str]] = set()
-    completed_measured_groups: set[tuple[str, str, int]] = set()
-    termination: dict[str, Any] | None = None
 
-    # Stage 3: resolve all work before execution.  This makes run.json describe
-    # the intended run shape even if the process is interrupted later.
+    # Stage 3: stabilize fresh databases, then resolve all query work before
+    # execution.  This makes run.json describe the intended run shape even if
+    # the process is interrupted later.
     for spec in resolved_runs:
         # A fresh run owns one statistics snapshot per prepared database.  Resume
         # keeps the existing snapshot so one artifact does not mix pre/post-ANALYZE
@@ -151,42 +147,18 @@ def run_scenario(
     # Stage 4: for resume, trust the artifact state and skip database
     # stabilization so one run_id does not combine two statistics snapshots.
     if resume_run_id:
-        run_context_path = out_dir / "run.json"
-        if not run_context_path.is_file():
-            die(f"resume run_id is missing run.json: {run_context_path}")
-        run_context = json.loads(run_context_path.read_text())
-        validate_resume_context(
-            run_context,
+        state = load_resume_state(
+            out_dir=out_dir,
+            run_id=run_id,
             scenario=scenario,
             tag=tag,
             statement_timeout_ms=statement_timeout_ms,
             variant_names=variant_names,
             resolved_runs=resolved_runs,
         )
-        if run_context.get("progress", {}).get("completed") is True:
+        if state.completed:
             print(f"[run] resume target already completed: {run_id}")
             return
-        # Rebuild in-memory state from durable artifacts.  Progress is tracked at
-        # whole warmup-group and whole measured-group granularity only.
-        raw_rows = load_raw_rows(out_dir / "raw.csv")
-        summary_acc = build_summary_acc_from_raw_rows(raw_rows)
-        warmup_failures = list(run_context.get("warmup_failures", []))
-        warmup_timeout_keys = {
-            (str(row["dataset"]), str(row["query_id"]), str(row["variant"]))
-            for row in warmup_failures
-            if row.get("category") == "statement_timeout"
-        }
-        progress = run_context.get("progress", {})
-        completed_warmup_groups = deserialize_warmup_groups(
-            progress.get("completed_warmup_groups", [])
-        )
-        completed_measured_groups = deserialize_measured_groups(
-            progress.get("completed_measured_groups", [])
-        )
-        print(
-            f"[run] resume_run_id={run_id} completed_warmup_groups={len(completed_warmup_groups)} "
-            f"completed_measured_groups={len(completed_measured_groups)}"
-        )
 
     # Persist the full run shape before executing groups.  Even interrupted runs
     # then have enough context for resume validation and post-run inspection.
@@ -195,38 +167,33 @@ def run_scenario(
         run_id=run_id,
         scenario=scenario,
         resolved_runs=resolved_runs,
-        raw_rows=raw_rows,
-        summary_acc=summary_acc,
+        state=state,
         tag=tag,
         statement_timeout_ms=statement_timeout_ms,
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
-        warmup_failures=warmup_failures,
-        termination=termination,
-        completed_warmup_groups=completed_warmup_groups,
-        completed_measured_groups=completed_measured_groups,
         completed=False,
     )
 
     # Stage 5: execute at query-group boundaries.  All variants for one warmup
     # pass or measured repetition complete before the progress marker advances.
     for prepared in prepared_runs:
-        if termination is not None:
+        if state.termination is not None:
             break
         spec = prepared["spec"]
         entry_variants = prepared["entry_variants"]
         query_plans = prepared["query_plans"]
 
         for query_idx, (q, stmt) in enumerate(query_plans):
-            if termination is not None:
+            if state.termination is not None:
                 break
 
             for warmup_pass in range(1, WARMUP_RUNS + 1):
                 warmup_group = (warmup_pass, spec.dataset, q.query_id)
-                if warmup_group in completed_warmup_groups:
+                if warmup_group in state.completed_warmup_groups:
                     continue
 
-                termination = execute_warmup_group(
+                state.termination = execute_warmup_group(
                     scenario=scenario,
                     spec=spec,
                     query=q,
@@ -237,38 +204,33 @@ def run_scenario(
                     conn=conn,
                     statement_timeout_ms=statement_timeout_ms,
                     fail_on_error=fail_on_error,
-                    warmup_failures=warmup_failures,
-                    warmup_timeout_keys=warmup_timeout_keys,
+                    warmup_failures=state.warmup_failures,
+                    warmup_timeout_keys=state.warmup_timeout_keys,
                 )
-                if termination is not None:
+                if state.termination is not None:
                     break
                 # Warmup rows are intentionally not measured artifacts; only the
                 # completed group marker and any timeout/error state are persisted.
-                completed_warmup_groups.add(warmup_group)
+                state.completed_warmup_groups.add(warmup_group)
                 flush_outputs(
                     out_dir=out_dir,
                     run_id=run_id,
                     scenario=scenario,
                     resolved_runs=resolved_runs,
-                    raw_rows=raw_rows,
-                    summary_acc=summary_acc,
+                    state=state,
                     tag=tag,
                     statement_timeout_ms=statement_timeout_ms,
                     effective_variant_contexts=effective_variant_contexts,
                     query_counts=query_counts,
-                    warmup_failures=warmup_failures,
-                    termination=termination,
-                    completed_warmup_groups=completed_warmup_groups,
-                    completed_measured_groups=completed_measured_groups,
                     completed=False,
                 )
 
-            if termination is not None:
+            if state.termination is not None:
                 break
 
             for rep in range(1, MEASURED_REPS + 1):
                 measured_group = (spec.dataset, q.query_id, rep)
-                if measured_group in completed_measured_groups:
+                if measured_group in state.completed_measured_groups:
                     continue
                 execute_measured_group(
                     scenario=scenario,
@@ -280,26 +242,21 @@ def run_scenario(
                     entry_variants=entry_variants,
                     conn=conn,
                     statement_timeout_ms=statement_timeout_ms,
-                    warmup_timeout_keys=warmup_timeout_keys,
-                    raw_rows=raw_rows,
-                    summary_acc=summary_acc,
+                    warmup_timeout_keys=state.warmup_timeout_keys,
+                    raw_rows=state.raw_rows,
+                    summary_acc=state.summary_acc,
                 )
-                completed_measured_groups.add(measured_group)
+                state.completed_measured_groups.add(measured_group)
                 flush_outputs(
                     out_dir=out_dir,
                     run_id=run_id,
                     scenario=scenario,
                     resolved_runs=resolved_runs,
-                    raw_rows=raw_rows,
-                    summary_acc=summary_acc,
+                    state=state,
                     tag=tag,
                     statement_timeout_ms=statement_timeout_ms,
                     effective_variant_contexts=effective_variant_contexts,
                     query_counts=query_counts,
-                    warmup_failures=warmup_failures,
-                    termination=termination,
-                    completed_warmup_groups=completed_warmup_groups,
-                    completed_measured_groups=completed_measured_groups,
                     completed=False,
                 )
     # Stage 6: mark the final progress state and summarize non-fatal failures.
@@ -308,45 +265,43 @@ def run_scenario(
         run_id=run_id,
         scenario=scenario,
         resolved_runs=resolved_runs,
-        raw_rows=raw_rows,
-        summary_acc=summary_acc,
+        state=state,
         tag=tag,
         statement_timeout_ms=statement_timeout_ms,
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
-        warmup_failures=warmup_failures,
-        termination=termination,
-        completed_warmup_groups=completed_warmup_groups,
-        completed_measured_groups=completed_measured_groups,
-        completed=termination is None,
+        completed=state.termination is None,
     )
 
-    warmup_timeout_rows = [row for row in warmup_failures if row["category"] == "statement_timeout"]
-    warmup_error_rows = [row for row in warmup_failures if row["category"] == "error"]
+    warmup_timeout_rows = [
+        row for row in state.warmup_failures if row["category"] == "statement_timeout"
+    ]
+    warmup_error_rows = [row for row in state.warmup_failures if row["category"] == "error"]
     skipped_timeout_rows = [
         row
-        for row in raw_rows
+        for row in state.raw_rows
         if row["status"] == "timeout"
         and row["error"].startswith("skipped measured run after warmup timeout:")
     ]
     timeout_rows = [
         row
-        for row in raw_rows
+        for row in state.raw_rows
         if row["status"] == "timeout"
         and not row["error"].startswith("skipped measured run after warmup timeout:")
     ]
-    err_rows = [row for row in raw_rows if row["status"] == "error"]
+    err_rows = [row for row in state.raw_rows if row["status"] == "error"]
 
     print_failure_rows(label="warmup_timeouts", rows=warmup_timeout_rows)
     print_failure_rows(label="warmup_errors", rows=warmup_error_rows)
     print_failure_rows(label="skipped_timeouts", rows=skipped_timeout_rows)
     print_failure_rows(label="timeouts", rows=timeout_rows)
 
-    if termination is not None:
+    if state.termination is not None:
         print(
-            f"[run] terminated phase={termination['phase']} dataset={termination['dataset']} "
-            f"variant={termination['variant']} query={termination['query_id']}: "
-            f"{termination['error']}"
+            f"[run] terminated phase={state.termination['phase']} "
+            f"dataset={state.termination['dataset']} "
+            f"variant={state.termination['variant']} query={state.termination['query_id']}: "
+            f"{state.termination['error']}"
         )
         raise SystemExit(1)
 
@@ -354,10 +309,82 @@ def run_scenario(
         print_failure_rows(label="errors", rows=err_rows)
         if fail_on_error:
             raise SystemExit(1)
-    elif warmup_failures or skipped_timeout_rows or timeout_rows:
+    elif state.warmup_failures or skipped_timeout_rows or timeout_rows:
         print("[run] completed with non-fatal failures")
     else:
         print("[run] completed without errors")
+
+
+@dataclass
+class RunState:
+    """Mutable artifact/progress state for a benchmark run.
+
+    Fresh runs start with empty state.  Resume rebuilds the same fields from
+    durable artifacts, so the execution loop can treat fresh and resumed runs
+    uniformly.
+    """
+
+    raw_rows: list[dict[str, str]] = field(default_factory=list)
+    summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = field(default_factory=dict)
+    warmup_failures: list[dict[str, Any]] = field(default_factory=list)
+    warmup_timeout_keys: set[tuple[str, str, str]] = field(default_factory=set)
+    completed_warmup_groups: set[tuple[int, str, str]] = field(default_factory=set)
+    completed_measured_groups: set[tuple[str, str, int]] = field(default_factory=set)
+    termination: dict[str, Any] | None = None
+    completed: bool = False
+
+
+def load_resume_state(
+    *,
+    out_dir: Path,
+    run_id: str,
+    scenario: Scenario,
+    tag: str,
+    statement_timeout_ms: int,
+    variant_names: tuple[str, ...],
+    resolved_runs: list[ResolvedDatasetRun],
+) -> RunState:
+    """Validate a resume target and rebuild run state from its artifacts."""
+
+    run_context_path = out_dir / "run.json"
+    if not run_context_path.is_file():
+        die(f"resume run_id is missing run.json: {run_context_path}")
+
+    run_context = json.loads(run_context_path.read_text())
+    validate_resume_context(
+        run_context,
+        scenario=scenario,
+        tag=tag,
+        statement_timeout_ms=statement_timeout_ms,
+        variant_names=variant_names,
+        resolved_runs=resolved_runs,
+    )
+
+    progress = run_context.get("progress", {})
+    state = RunState(completed=progress.get("completed") is True)
+    if state.completed:
+        return state
+
+    state.raw_rows = load_raw_rows(out_dir / "raw.csv")
+    state.summary_acc = build_summary_acc_from_raw_rows(state.raw_rows)
+    state.warmup_failures = list(run_context.get("warmup_failures", []))
+    state.warmup_timeout_keys = {
+        (str(row["dataset"]), str(row["query_id"]), str(row["variant"]))
+        for row in state.warmup_failures
+        if row.get("category") == "statement_timeout"
+    }
+    state.completed_warmup_groups = deserialize_warmup_groups(
+        progress.get("completed_warmup_groups", [])
+    )
+    state.completed_measured_groups = deserialize_measured_groups(
+        progress.get("completed_measured_groups", [])
+    )
+    print(
+        f"[run] resume_run_id={run_id} "
+        f"completed_warmup_groups={len(state.completed_warmup_groups)} "
+        f"completed_measured_groups={len(state.completed_measured_groups)}"
+    )
+    return state
 
 
 def execute_warmup_group(
@@ -701,28 +728,23 @@ def flush_outputs(
     run_id: str,
     scenario: Scenario,
     resolved_runs: list[ResolvedDatasetRun],
-    raw_rows: list[dict[str, str]],
-    summary_acc: dict[tuple[str, str, str], list[dict[str, object]]],
+    state: RunState,
     tag: str,
     statement_timeout_ms: int,
     effective_variant_contexts: list[dict[str, Any]],
     query_counts: list[dict[str, Any]],
-    warmup_failures: list[dict[str, Any]],
-    termination: Optional[dict[str, Any]],
-    completed_warmup_groups: set[tuple[int, str, str]],
-    completed_measured_groups: set[tuple[str, str, int]],
     completed: bool,
 ) -> None:
     """Write all resumable artifacts from the current in-memory run state."""
 
     raw_path = out_dir / "raw.csv"
-    write_raw_csv(raw_path, raw_rows)
+    write_raw_csv(raw_path, state.raw_rows)
 
     summary_path = out_dir / "summary.csv"
     write_summary_csv(
         summary_path,
         resolved_runs=resolved_runs,
-        summary_acc=summary_acc,
+        summary_acc=state.summary_acc,
     )
 
     run_context = build_run_context(
@@ -733,14 +755,14 @@ def flush_outputs(
         effective_variant_contexts=effective_variant_contexts,
         query_counts=query_counts,
     )
-    if warmup_failures:
-        run_context["warmup_failures"] = warmup_failures
-    if termination is not None:
-        run_context["termination"] = termination
+    if state.warmup_failures:
+        run_context["warmup_failures"] = state.warmup_failures
+    if state.termination is not None:
+        run_context["termination"] = state.termination
     run_context["progress"] = {
         "completed": completed,
-        "completed_warmup_groups": serialize_warmup_groups(completed_warmup_groups),
-        "completed_measured_groups": serialize_measured_groups(completed_measured_groups),
+        "completed_warmup_groups": serialize_warmup_groups(state.completed_warmup_groups),
+        "completed_measured_groups": serialize_measured_groups(state.completed_measured_groups),
     }
 
     write_run_context(out_dir / "run.json", run_context)

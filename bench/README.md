@@ -13,17 +13,16 @@ protocol, then read [bench_run.py](bench_run.py) for run orchestration and
 
 [bench_run.py](bench_run.py) owns the run orchestration:
 
-1. Check prepared databases, required PostgreSQL GUCs, and resume context before
-   executing queries.
-2. Stabilize each prepared database for a new run; `--resume-run-id` keeps the
+1. Check prepared databases and required PostgreSQL GUCs before executing
+   queries.
+2. Stabilize each prepared database for a new run; resumed runs keep the
    existing statistics snapshot.
 3. Resolve the full dataset/query/variant plan before execution and write the
    initial `run.json`.
 4. Execute discarded warmup groups and measured repetitions, rotating variant
    order across query groups.
-5. Checkpoint `run.json`, `raw.csv`, and `summary.csv` after complete warmup
-   groups and complete measured groups.
-6. Record timeout/error rows and rebuild progress from artifacts when resuming.
+5. Checkpoint group-level progress in `run.json`, `raw.csv`, and `summary.csv`.
+6. Record timeout/error rows without making them fatal unless requested.
 
 Then read [bench_exec.py](bench_exec.py) for the single-statement execution
 mechanics:
