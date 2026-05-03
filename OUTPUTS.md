@@ -21,6 +21,8 @@ outputs/<run_id>/
 YYYYMMDD_HHMMSS_microseconds_<scenario>
 ```
 
+The timestamp is UTC.
+
 For example:
 
 ```text
