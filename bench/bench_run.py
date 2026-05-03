@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from bench_catalog import build_statement, load_sql_for_query, select_queries
+from bench_workloads import build_statement, load_sql_for_query, select_queries
 from bench_common import (
     ConnOpts,
     OUTPUTS_DIR,
@@ -22,7 +22,7 @@ from bench_exec import (
     StatementTimeoutError,
     ensure_databases_reachable,
     resolved_variant_session_gucs,
-    run_one,
+    run_one_statement,
     stabilize_db,
     validate_required_gucs,
 )
@@ -395,7 +395,7 @@ def execute_warmup_group(
     ordered_variants = rotate_variants(entry_variants, query_idx + warmup_pass - 1)
     for variant in ordered_variants:
         try:
-            run_one(
+            run_one_statement(
                 spec.db,
                 scenario.session_gucs,
                 variant,
@@ -477,7 +477,7 @@ def execute_measured_group(
             err = warmup_timeout_skip_error("ERROR: canceling statement due to statement timeout")
         else:
             try:
-                metrics = run_one(
+                metrics = run_one_statement(
                     spec.db,
                     scenario.session_gucs,
                     variant,

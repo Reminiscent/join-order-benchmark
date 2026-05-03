@@ -13,11 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_common import DatasetSpec, Scenario
-import bench_catalog
-from bench_catalog import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
+import bench_workloads
+from bench_workloads import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
 
 
-class BenchCatalogTests(unittest.TestCase):
+class BenchWorkloadsTests(unittest.TestCase):
     def make_scenario(self) -> Scenario:
         return Scenario(
             name="full",
@@ -42,7 +42,7 @@ class BenchCatalogTests(unittest.TestCase):
     def test_load_variants_uses_built_ins_when_default_extra_file_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             missing_path = Path(tmpdir) / "missing.toml"
-            with patch.object(bench_catalog, "DEFAULT_VARIANTS_FILE", missing_path):
+            with patch.object(bench_workloads, "DEFAULT_VARIANTS_FILE", missing_path):
                 variants = load_variants()
 
         self.assertEqual(tuple(variants), ("dp", "geqo"))
@@ -61,7 +61,7 @@ class BenchCatalogTests(unittest.TestCase):
         out = io.StringIO()
 
         with redirect_stdout(out):
-            bench_catalog.print_scenarios({"full": self.make_scenario()})
+            bench_workloads.print_scenarios({"full": self.make_scenario()})
 
         self.assertEqual(
             out.getvalue(),

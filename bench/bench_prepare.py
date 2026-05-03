@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from bench_catalog import (
+from bench_workloads import (
     PREPARE_MARKERS,
     dataset_prepare_scripts,
     resolve_prepare_dataset_runs,

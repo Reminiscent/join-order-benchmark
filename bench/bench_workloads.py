@@ -1,3 +1,11 @@
+"""Benchmark workload definitions and resolution helpers.
+
+This module owns the built-in scenarios, variants, dataset mappings, query
+manifest access, and SQL wrapping rules.  ``bench.py`` uses it to turn CLI
+choices into concrete prepare/run work before handing execution to
+``bench_prepare.py`` or ``bench_run.py``.
+"""
+
 from __future__ import annotations
 
 import csv

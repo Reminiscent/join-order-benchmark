@@ -6,7 +6,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-from bench_catalog import select_queries
+from bench_workloads import select_queries
 
 
 def write_raw_csv(raw_path: Path, raw_rows: list[dict[str, str]]) -> None:

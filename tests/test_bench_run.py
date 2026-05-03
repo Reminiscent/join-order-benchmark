@@ -97,7 +97,7 @@ class RunScenarioTests(unittest.TestCase):
         stack.enter_context(patch.object(bench_run, "build_statement", Mock(side_effect=lambda _dataset, sql: sql)))
         stack.enter_context(patch.object(bench_run, "write_summary_csv", Mock(side_effect=write_summary_csv_stub)))
         run_one_mock = Mock(side_effect=run_one_side_effect)
-        stack.enter_context(patch.object(bench_run, "run_one", run_one_mock))
+        stack.enter_context(patch.object(bench_run, "run_one_statement", run_one_mock))
         return run_one_mock, stabilize_mock
 
     def only_run_dir(self, outputs_dir: Path) -> Path:

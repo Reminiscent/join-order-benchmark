@@ -1,10 +1,10 @@
 """PostgreSQL execution helpers for benchmark runs.
 
-``run_one()`` is the primary entry point: it creates a clean session prelude,
-runs one measured ``EXPLAIN ANALYZE`` statement, and returns the timing/cost
-fields consumed by ``bench_run.py``.  The remaining helpers validate the
-PostgreSQL execution environment, stabilize database statistics, and parse
-``psql`` output.
+``run_one_statement()`` is the primary entry point: it creates a clean session
+prelude, runs one measured ``EXPLAIN ANALYZE`` statement, and returns the
+timing/cost fields consumed by ``bench_run.py``.  The remaining helpers
+validate the PostgreSQL execution environment, stabilize database statistics,
+and parse ``psql`` output.
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ class StatementTimeoutError(RuntimeError):
     """Raised when PostgreSQL cancels a statement due to statement_timeout."""
 
 
-def run_one(
+def run_one_statement(
     db: str,
     scenario_session_gucs: tuple[tuple[str, Any], ...],
     variant: Variant,

@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from bench_common import ConnOpts, die
-from bench_catalog import (
+from bench_workloads import (
     load_scenarios,
     load_variants,
     print_datasets,
