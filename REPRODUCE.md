@@ -142,18 +142,7 @@ semantics, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
 | --- | --- |
 | `--variants` | choose the variants and display/order them explicitly |
 | `--variants-file` | use a different extra variant TOML file |
-| `--resume-run-id` | continue an interrupted run from a safe boundary |
 | `--statement-timeout-ms` | adjust the per-statement guardrail timeout |
 | `--tag` | record a local build or patch label in `run.json` |
 
-Resume an interrupted run by passing the output directory name:
-
-```bash
-python3 bench/bench.py run main \
-  --variants dp,geqo,goo_cost \
-  --resume-run-id 20260412_142110_777847_main
-```
-
-Use the same scenario, variant list, extra variants file if overridden,
-connection flags, tag, and statement timeout as the original run.  Timeout and
-resume semantics are described in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
+Timeout handling is described in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).

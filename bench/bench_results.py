@@ -105,7 +105,7 @@ def build_run_context(
     tag: str,
     statement_timeout_ms: int,
     effective_variant_contexts: list[dict[str, Any]],
-    query_counts: list[dict[str, Any]],
+    dataset_contexts: list[dict[str, Any]],
 ) -> dict[str, Any]:
     run_context = {
         "run_id": run_id,
@@ -119,7 +119,7 @@ def build_run_context(
                 "max_join": entry["max_join"],
                 "variants": entry["variants"],
             }
-            for entry in query_counts
+            for entry in dataset_contexts
         ],
     }
     if tag:

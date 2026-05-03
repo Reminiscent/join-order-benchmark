@@ -130,7 +130,6 @@ class RunScenarioTests(unittest.TestCase):
                 self.make_resolved_runs(),
                 conn=None,
                 statement_timeout_ms=1000,
-                resume_run_id=None,
                 tag="",
             )
 
@@ -160,7 +159,6 @@ class RunScenarioTests(unittest.TestCase):
                 self.make_resolved_runs(),
                 conn=None,
                 statement_timeout_ms=1000,
-                resume_run_id=None,
                 tag="",
             )
 
@@ -188,7 +186,6 @@ class RunScenarioTests(unittest.TestCase):
                     self.make_resolved_runs(),
                     conn=None,
                     statement_timeout_ms=1000,
-                    resume_run_id=None,
                     tag="",
                 )
 
@@ -218,7 +215,6 @@ class RunScenarioTests(unittest.TestCase):
                     self.make_resolved_runs(),
                     conn=None,
                     statement_timeout_ms=1000,
-                    resume_run_id=None,
                     tag="",
                 )
 
@@ -268,7 +264,6 @@ class RunScenarioTests(unittest.TestCase):
                     resolved_runs,
                     conn=None,
                     statement_timeout_ms=1000,
-                    resume_run_id=None,
                     tag="",
                 )
 
@@ -277,8 +272,6 @@ class RunScenarioTests(unittest.TestCase):
             run_dir = self.only_run_dir(outputs_dir)
             run_context = self.read_run_context(run_dir)
             raw_rows = self.read_raw_rows(run_dir)
-            self.assertEqual(run_context["progress"]["completed_groups"], 0)
-            self.assertEqual(run_context["progress"]["total_groups"], 1)
             self.assertEqual(len(raw_rows), 1)
             self.assertEqual(raw_rows[0]["variant"], "dp")
             self.assertEqual(raw_rows[0]["status"], "error")
@@ -302,7 +295,6 @@ class RunScenarioTests(unittest.TestCase):
                 self.make_resolved_runs(),
                 conn=None,
                 statement_timeout_ms=1000,
-                resume_run_id=None,
                 tag="",
             )
 
@@ -320,8 +312,6 @@ class RunScenarioTests(unittest.TestCase):
             )
             self.assertEqual(run_context["statement_timeout_ms"], 1000)
             self.assertNotIn("protocol", run_context)
-            self.assertEqual(run_context["progress"]["completed_groups"], 3)
-            self.assertEqual(run_context["progress"]["total_groups"], 3)
 
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")
@@ -350,7 +340,6 @@ class RunScenarioTests(unittest.TestCase):
                 self.make_resolved_runs(),
                 conn=None,
                 statement_timeout_ms=1000,
-                resume_run_id=None,
                 tag="",
             )
 
@@ -366,139 +355,6 @@ class RunScenarioTests(unittest.TestCase):
                 [(row["query_id"], row["rep"]) for row in raw_rows],
                 [("q1", "1"), ("q1", "2"), ("q2", "1"), ("q2", "2")],
             )
-
-    def test_resume_run_id_continues_from_next_measured_group_boundary(self) -> None:
-        q1 = self.make_query_with_id("q1")
-        q2 = self.make_query_with_id("q2")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            outputs_dir = Path(tmpdir) / "outputs"
-            outputs_dir.mkdir()
-            with ExitStack() as stack:
-                run_one_mock, stabilize_mock = self.patch_run_environment(
-                    stack,
-                    outputs_dir,
-                    [
-                        bench_exec.RunMetrics(planning_ms=1.0, execution_ms=2.0, total_ms=3.0, plan_total_cost=4.0),
-                        KeyboardInterrupt(),
-                    ],
-                    queries=[q1, q2],
-                )
-                with self.assertRaises(KeyboardInterrupt):
-                    bench_run.run_scenario(
-                        self.make_scenario(),
-                        self.make_variant_registry(),
-                        ("dp",),
-                        self.make_resolved_runs(),
-                        conn=None,
-                        statement_timeout_ms=1000,
-                        resume_run_id=None,
-                        tag="resume",
-                    )
-                self.assertEqual(run_one_mock.call_count, 2)
-                stabilize_mock.assert_called_once_with("bench_job", None)
-
-            run_dir = self.only_run_dir(outputs_dir)
-            self.assertEqual([row["query_id"] for row in self.read_raw_rows(run_dir)], ["q1"])
-
-            with ExitStack() as stack:
-                run_one_mock, stabilize_mock = self.patch_run_environment(
-                    stack,
-                    outputs_dir,
-                    lambda *args, **kwargs: bench_exec.RunMetrics(
-                        planning_ms=5.0,
-                        execution_ms=6.0,
-                        total_ms=11.0,
-                        plan_total_cost=7.0,
-                    ),
-                    queries=[q1, q2],
-                )
-                bench_run.run_scenario(
-                    self.make_scenario(),
-                    self.make_variant_registry(),
-                    ("dp",),
-                    self.make_resolved_runs(),
-                    conn=None,
-                    statement_timeout_ms=1000,
-                    resume_run_id=run_dir.name,
-                    tag="resume",
-                )
-                self.assertEqual(run_one_mock.call_count, 1)
-                stabilize_mock.assert_not_called()
-
-            raw_rows = self.read_raw_rows(run_dir)
-            self.assertEqual([row["query_id"] for row in raw_rows], ["q1", "q2"])
-            run_context = self.read_run_context(run_dir)
-            self.assertTrue(run_context["progress"]["completed"])
-            self.assertEqual(run_context["progress"]["completed_groups"], 2)
-            self.assertEqual(run_context["progress"]["total_groups"], 2)
-
-    def test_resume_run_id_restores_warmup_timeout_skip_state(self) -> None:
-        q1 = self.make_query_with_id("q1")
-        q2 = self.make_query_with_id("q2")
-        with tempfile.TemporaryDirectory() as tmpdir:
-            outputs_dir = Path(tmpdir) / "outputs"
-            outputs_dir.mkdir()
-            with ExitStack() as stack:
-                run_one_mock, _ = self.patch_run_environment(
-                    stack,
-                    outputs_dir,
-                    [
-                        bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
-                        KeyboardInterrupt(),
-                    ],
-                    queries=[q1, q2],
-                    warmup_runs=1,
-                )
-                with self.assertRaises(KeyboardInterrupt):
-                    bench_run.run_scenario(
-                        self.make_scenario(),
-                        self.make_variant_registry(),
-                        ("dp",),
-                        self.make_resolved_runs(),
-                        conn=None,
-                        statement_timeout_ms=1000,
-                        resume_run_id=None,
-                        tag="resume-warmup",
-                    )
-                self.assertEqual(run_one_mock.call_count, 2)
-
-            run_dir = self.only_run_dir(outputs_dir)
-            run_context = self.read_run_context(run_dir)
-            self.assertEqual(run_context["progress"]["completed_groups"], 2)
-            self.assertEqual(run_context["progress"]["total_groups"], 4)
-
-            with ExitStack() as stack:
-                run_one_mock, _ = self.patch_run_environment(
-                    stack,
-                    outputs_dir,
-                    lambda *args, **kwargs: bench_exec.RunMetrics(
-                        planning_ms=9.0,
-                        execution_ms=10.0,
-                        total_ms=19.0,
-                        plan_total_cost=11.0,
-                    ),
-                    queries=[q1, q2],
-                    warmup_runs=1,
-                )
-                bench_run.run_scenario(
-                    self.make_scenario(),
-                    self.make_variant_registry(),
-                    ("dp",),
-                    self.make_resolved_runs(),
-                    conn=None,
-                    statement_timeout_ms=1000,
-                    resume_run_id=run_dir.name,
-                    tag="resume-warmup",
-                )
-                self.assertEqual(run_one_mock.call_count, 2)
-
-            raw_rows = self.read_raw_rows(run_dir)
-            self.assertEqual(len(raw_rows), 2)
-            self.assertEqual(raw_rows[0]["query_id"], "q1")
-            self.assertEqual(raw_rows[0]["status"], "timeout")
-            self.assertTrue(raw_rows[0]["error"].startswith("skipped measured run after warmup timeout:"))
-            self.assertEqual(raw_rows[1]["query_id"], "q2")
-
 
 if __name__ == "__main__":
     unittest.main()

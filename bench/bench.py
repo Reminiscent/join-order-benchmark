@@ -105,14 +105,6 @@ def build_parser() -> argparse.ArgumentParser:
     ap_run.add_argument("--variants", default=None, help="variant1,variant2 (optional override)")
     add_variant_file_arg(ap_run)
     ap_run.add_argument(
-        "--resume-run-id",
-        default=None,
-        help=(
-            "resume an existing outputs/<run_id> directory from the next unfinished "
-            "group boundary without re-running database stabilization"
-        ),
-    )
-    ap_run.add_argument(
         "--statement-timeout-ms",
         type=int,
         default=None,
@@ -177,7 +169,6 @@ def main() -> None:
                 if args.statement_timeout_ms is not None
                 else scenario.statement_timeout_ms
             ),
-            resume_run_id=args.resume_run_id,
             tag=args.tag,
         )
         return

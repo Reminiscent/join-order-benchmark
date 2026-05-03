@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -41,37 +39,26 @@ def run_scenario(
     *,
     conn: Optional[ConnOpts],
     statement_timeout_ms: int,
-    resume_run_id: Optional[str],
     tag: str,
 ) -> None:
-    """Execute one resolved benchmark scenario and maintain resumable artifacts.
+    """Execute one resolved benchmark scenario and write run artifacts.
 
-    A run is checkpointed only after whole query groups complete.  That keeps
-    ``raw.csv``, ``summary.csv``, and ``run.json`` consistent enough for
-    ``--resume-run-id`` to rebuild in-memory progress without replaying partial
-    groups.  Fresh runs stabilize each prepared database before any query is
-    executed; resumed runs reuse the existing statistics snapshot recorded by
-    the partial artifact.  ``statement_timeout`` is a recorded benchmark result;
-    non-timeout errors terminate the run after current artifacts are written.
+    Each invocation creates a new output directory.  The runner stabilizes each
+    prepared database before executing queries, writes ``raw.csv``,
+    ``summary.csv``, and ``run.json`` as work completes, records
+    ``statement_timeout`` as benchmark data, and exits non-zero on non-timeout
+    errors after writing the current artifacts.
     """
 
     if statement_timeout_ms < 0:
         die(f"statement timeout must be >= 0 (got {statement_timeout_ms})")
 
-    # Stage 1: create or locate the output directory and verify that the target
-    # PostgreSQL server can run the selected scenario/variant GUCs.
-    run_id = (
-        resume_run_id
-        if resume_run_id
-        else f"{utc_now().strftime('%Y%m%d_%H%M%S_%f')}_{safe_artifact_name(scenario.name)}"
-    )
+    # Stage 1: create the output directory and verify that the target PostgreSQL
+    # server can run the selected scenario/variant GUCs.
+    run_id = f"{utc_now().strftime('%Y%m%d_%H%M%S_%f')}_{safe_artifact_name(scenario.name)}"
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     out_dir = OUTPUTS_DIR / run_id
-    if resume_run_id:
-        if not out_dir.is_dir():
-            die(f"resume run_id not found: {out_dir}")
-    else:
-        out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     dbs = sorted({entry.db for entry in resolved_runs})
     ensure_databases_reachable(dbs, conn)
@@ -88,39 +75,31 @@ def run_scenario(
         for name in variant_names
     ]
 
-    # Stage 2: initialize the run state.  Resume state is loaded as one unit so
-    # artifact-rebuild details do not interrupt the main execution path.
+    # Stage 2: initialize the in-memory rows that feed the run artifacts.
     print(f"[run] scenario={scenario.name}")
     print(f"[run] variants={','.join(variant_names)}")
     print(f"[run] warmup_passes={WARMUP_RUNS} measured_reps={MEASURED_REPS}")
     print(f"[run] outputs={out_dir}")
 
     state = RunState()
-    query_counts: list[dict[str, Any]] = []
+    dataset_contexts: list[dict[str, Any]] = []
     stabilized_dbs: set[str] = set()
     prepared_runs: list[PreparedRunWork] = []
 
-    # Stage 3: stabilize fresh databases, then resolve all query work before
-    # execution.  This makes run.json describe the intended run shape even if
-    # the process is interrupted later.
+    # Stage 3: stabilize prepared databases, then resolve all query work before
+    # execution.  This fails early on missing SQL files, before measured rows
+    # start to appear in the artifacts.
     for spec in resolved_runs:
-        # A fresh run owns one statistics snapshot per prepared database.  Resume
-        # keeps the existing snapshot so one artifact does not mix pre/post-ANALYZE
-        # groups.
-        if resume_run_id is None and spec.db not in stabilized_dbs:
+        if spec.db not in stabilized_dbs:
             stabilize_db(spec.db, conn)
             stabilized_dbs.add(spec.db)
 
-        # Resolve query SQL before executing anything so the run context records
-        # the complete dataset/query/variant plan even for interrupted runs.
         queries = select_queries(spec)
         query_plans = [(q, build_statement(spec.dataset, load_sql_for_query(q))) for q in queries]
-        query_counts.append(
+        dataset_contexts.append(
             {
                 "dataset": spec.dataset,
-                "db": spec.db,
                 "max_join": spec.max_join,
-                "queries_selected": len(query_plans),
                 "variants": list(spec.variants),
             }
         )
@@ -140,25 +119,8 @@ def run_scenario(
 
     run_groups = build_run_groups(prepared_runs)
 
-    # Stage 4: for resume, trust the artifact state and skip database
-    # stabilization so one run_id does not combine two statistics snapshots.
-    if resume_run_id:
-        state = load_resume_state(
-            out_dir=out_dir,
-            run_id=run_id,
-            scenario=scenario,
-            tag=tag,
-            statement_timeout_ms=statement_timeout_ms,
-            variant_names=variant_names,
-            resolved_runs=resolved_runs,
-            run_groups=run_groups,
-        )
-        if state.completed:
-            print(f"[run] resume target already completed: {run_id}")
-            return
-
-    # Persist the full run shape before executing groups.  Even interrupted runs
-    # then have enough context for resume validation and post-run inspection.
+    # Stage 4: write run.json before executing groups so the output directory
+    # immediately records the requested scenario, datasets, and variants.
     flush_outputs(
         out_dir=out_dir,
         run_id=run_id,
@@ -168,17 +130,12 @@ def run_scenario(
         tag=tag,
         statement_timeout_ms=statement_timeout_ms,
         effective_variant_contexts=effective_variant_contexts,
-        query_counts=query_counts,
-        total_groups=len(run_groups),
-        completed=False,
+        dataset_contexts=dataset_contexts,
     )
 
-    # Stage 5: execute at query-group boundaries.  All variants for one warmup
-    # pass or measured repetition complete before the progress marker advances.
-    for group_idx, group in enumerate(run_groups):
-        if group_idx < state.completed_groups:
-            continue
-
+    # Stage 5: execute warmup and measured groups.  Each group is one query plus
+    # all selected variants for one warmup pass or measured repetition.
+    for group in run_groups:
         if group.phase == "warmup":
             state.termination = execute_warmup_group(
                 scenario=scenario,
@@ -193,10 +150,6 @@ def run_scenario(
                 warmup_failures=state.warmup_failures,
                 warmup_timeout_keys=state.warmup_timeout_keys,
             )
-            if state.termination is None:
-                # Warmup rows are intentionally not measured artifacts; only the
-                # completed group count and any timeout/error state are persisted.
-                state.completed_groups = group_idx + 1
         else:
             state.termination = execute_measured_group(
                 scenario=scenario,
@@ -212,8 +165,6 @@ def run_scenario(
                 raw_rows=state.raw_rows,
                 summary_acc=state.summary_acc,
             )
-            if state.termination is None:
-                state.completed_groups = group_idx + 1
 
         flush_outputs(
             out_dir=out_dir,
@@ -224,51 +175,29 @@ def run_scenario(
             tag=tag,
             statement_timeout_ms=statement_timeout_ms,
             effective_variant_contexts=effective_variant_contexts,
-            query_counts=query_counts,
-            total_groups=len(run_groups),
-            completed=False,
+            dataset_contexts=dataset_contexts,
         )
         if state.termination is not None:
             break
-    # Stage 6: mark the final progress state and summarize failures.
-    flush_outputs(
-        out_dir=out_dir,
-        run_id=run_id,
-        scenario=scenario,
-        resolved_runs=resolved_runs,
-        state=state,
-        tag=tag,
-        statement_timeout_ms=statement_timeout_ms,
-        effective_variant_contexts=effective_variant_contexts,
-        query_counts=query_counts,
-        total_groups=len(run_groups),
-        completed=state.termination is None,
-    )
 
+    # Stage 6: summarize failures after the latest artifact flush.
     summarize_run_completion(state)
 
 
 @dataclass
 class RunState:
-    """Mutable artifact/progress state for a benchmark run.
-
-    Fresh runs start with empty state.  Resume rebuilds the same fields from
-    durable artifacts, so the execution loop can treat fresh and resumed runs
-    uniformly.
-    """
+    """Mutable rows and failure state for one benchmark run."""
 
     raw_rows: list[dict[str, str]] = field(default_factory=list)
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = field(default_factory=dict)
     warmup_failures: list[dict[str, Any]] = field(default_factory=list)
     warmup_timeout_keys: set[tuple[str, str, str]] = field(default_factory=set)
-    completed_groups: int = 0
     termination: dict[str, Any] | None = None
-    completed: bool = False
 
 
 @dataclass(frozen=True)
 class RunGroup:
-    """One checkpointable warmup or measured group in run order."""
+    """One warmup or measured group in run order."""
 
     phase: str
     spec: ResolvedDatasetRun
@@ -286,60 +215,6 @@ class PreparedRunWork:
     spec: ResolvedDatasetRun
     entry_variants: list[Variant]
     query_plans: list[tuple[QueryMeta, str]]
-
-
-def load_resume_state(
-    *,
-    out_dir: Path,
-    run_id: str,
-    scenario: Scenario,
-    tag: str,
-    statement_timeout_ms: int,
-    variant_names: tuple[str, ...],
-    resolved_runs: list[ResolvedDatasetRun],
-    run_groups: list[RunGroup],
-) -> RunState:
-    """Validate a resume target and rebuild run state from its artifacts."""
-
-    run_context_path = out_dir / "run.json"
-    if not run_context_path.is_file():
-        die(f"resume run_id is missing run.json: {run_context_path}")
-
-    run_context = json.loads(run_context_path.read_text())
-    if run_context.get("termination") is not None:
-        die("resume run_id has a fatal termination record; start a new run instead")
-
-    validate_resume_context(
-        run_context,
-        scenario=scenario,
-        tag=tag,
-        statement_timeout_ms=statement_timeout_ms,
-        variant_names=variant_names,
-        resolved_runs=resolved_runs,
-    )
-
-    progress = run_context.get("progress", {})
-    completed_groups = load_completed_group_count(progress, run_groups)
-    state = RunState(
-        completed=progress.get("completed") is True,
-        completed_groups=completed_groups,
-    )
-    if state.completed:
-        return state
-
-    state.raw_rows = load_raw_rows(out_dir / "raw.csv")
-    state.summary_acc = build_summary_acc_from_raw_rows(state.raw_rows)
-    state.warmup_failures = list(run_context.get("warmup_failures", []))
-    state.warmup_timeout_keys = {
-        (str(row["dataset"]), str(row["query_id"]), str(row["variant"]))
-        for row in state.warmup_failures
-        if row.get("category") == "statement_timeout"
-    }
-    print(
-        f"[run] resume_run_id={run_id} "
-        f"completed_groups={state.completed_groups}/{len(run_groups)}"
-    )
-    return state
 
 
 def execute_warmup_group(
@@ -427,10 +302,8 @@ def execute_measured_group(
     """Run one measured query group and append raw/summary accumulator rows.
 
     A measured group is one query plus all selected variants for one measured
-    repetition.  The caller checkpoints only after the group completes, so
-    resume never has to reason about partially written variant rows.  A fatal
-    non-timeout error stops the group immediately after the error row is
-    recorded; such runs are not resumable.
+    repetition.  A fatal non-timeout error stops the group immediately after the
+    error row is recorded.
     """
 
     ordered_variants = rotate_variants(entry_variants, query_idx + rep - 1)
@@ -615,7 +488,7 @@ def rotate_variants(variants: list[Variant], offset: int) -> list[Variant]:
 
 
 def build_run_groups(prepared_runs: list[PreparedRunWork]) -> list[RunGroup]:
-    """Return the linear checkpoint sequence for warmup and measured work."""
+    """Return the linear sequence of warmup and measured work."""
 
     groups: list[RunGroup] = []
     for prepared in prepared_runs:
@@ -647,116 +520,6 @@ def build_run_groups(prepared_runs: list[PreparedRunWork]) -> list[RunGroup]:
     return groups
 
 
-def dataset_contexts(resolved_runs: list[ResolvedDatasetRun]) -> list[dict[str, Any]]:
-    """Return the resume-validation view of selected datasets."""
-
-    return [
-        {
-            "dataset": spec.dataset,
-            "max_join": spec.max_join,
-            "variants": list(spec.variants),
-        }
-        for spec in resolved_runs
-    ]
-
-
-def load_raw_rows(raw_path: Path) -> list[dict[str, str]]:
-    """Load existing raw.csv rows for resume, or return an empty run state."""
-
-    if not raw_path.is_file():
-        return []
-    with raw_path.open(newline="") as f:
-        return list(csv.DictReader(f))
-
-
-def build_summary_acc_from_raw_rows(
-    raw_rows: list[dict[str, str]],
-) -> dict[tuple[str, str, str], list[dict[str, object]]]:
-    """Rebuild summary accumulators from durable raw.csv rows during resume."""
-
-    summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = {}
-    for row in raw_rows:
-        key = (row["dataset"], row["query_id"], row["variant"])
-        summary_acc.setdefault(key, []).append(
-            {
-                "rep": int(row["rep"]),
-                "planning_ms": float(row["planning_ms"]) if row["planning_ms"] else -1.0,
-                "total_ms": float(row["total_ms"]) if row["total_ms"] else -1.0,
-                "execution_ms": float(row["execution_ms"]) if row["execution_ms"] else -1.0,
-                "plan_total_cost": (
-                    float(row["plan_total_cost"]) if row["plan_total_cost"] else -1.0
-                ),
-                "status": row["status"],
-            }
-        )
-    return summary_acc
-
-
-def load_completed_group_count(
-    progress: dict[str, Any],
-    run_groups: list[RunGroup],
-) -> int:
-    """Return the completed linear group count stored in run.json progress."""
-
-    try:
-        completed_groups = int(progress["completed_groups"])
-        total_groups = int(progress["total_groups"])
-    except KeyError as e:
-        die(f"resume run_id is missing progress field: {e.args[0]}")
-
-    if total_groups != len(run_groups):
-        die(
-            "resume run_id total_groups does not match requested work: "
-            f"existing={total_groups!r}, expected={len(run_groups)}"
-        )
-    if completed_groups < 0 or completed_groups > len(run_groups):
-        die(
-            "resume run_id has invalid completed_groups: "
-            f"{completed_groups} for total_groups={len(run_groups)}"
-        )
-    return completed_groups
-
-
-def validate_resume_context(
-    run_context: dict[str, Any],
-    *,
-    scenario: Scenario,
-    tag: str,
-    statement_timeout_ms: int,
-    variant_names: tuple[str, ...],
-    resolved_runs: list[ResolvedDatasetRun],
-) -> None:
-    """Reject resume attempts that would change the original run protocol."""
-
-    if run_context.get("scenario") != scenario.name:
-        die(
-            f"resume run_id belongs to scenario '{run_context.get('scenario')}', "
-            f"expected '{scenario.name}'"
-        )
-
-    if (run_context.get("tag") or "") != tag:
-        die(f"resume run_id has tag '{run_context.get('tag', '')}', expected '{tag}'")
-
-    existing_timeout = run_context.get("statement_timeout_ms")
-    if existing_timeout != statement_timeout_ms:
-        die(
-            "resume run_id statement_timeout_ms mismatch: "
-            f"existing={existing_timeout!r}, expected={statement_timeout_ms!r}"
-        )
-
-    existing_variants = tuple(str(item.get("name")) for item in run_context.get("variants", []))
-    if existing_variants != variant_names:
-        die(
-            f"resume run_id variant mismatch: existing={','.join(existing_variants)}, "
-            f"expected={','.join(variant_names)}"
-        )
-
-    existing_datasets = run_context.get("datasets", [])
-    expected_datasets = dataset_contexts(resolved_runs)
-    if existing_datasets != expected_datasets:
-        die("resume run_id dataset selection or ordering does not match the requested run")
-
-
 def flush_outputs(
     *,
     out_dir: Path,
@@ -767,11 +530,9 @@ def flush_outputs(
     tag: str,
     statement_timeout_ms: int,
     effective_variant_contexts: list[dict[str, Any]],
-    query_counts: list[dict[str, Any]],
-    total_groups: int,
-    completed: bool,
+    dataset_contexts: list[dict[str, Any]],
 ) -> None:
-    """Write all resumable artifacts from the current in-memory run state."""
+    """Write all run artifacts from the current in-memory run state."""
 
     raw_path = out_dir / "raw.csv"
     write_raw_csv(raw_path, state.raw_rows)
@@ -789,16 +550,11 @@ def flush_outputs(
         tag=tag,
         statement_timeout_ms=statement_timeout_ms,
         effective_variant_contexts=effective_variant_contexts,
-        query_counts=query_counts,
+        dataset_contexts=dataset_contexts,
     )
     if state.warmup_failures:
         run_context["warmup_failures"] = state.warmup_failures
     if state.termination is not None:
         run_context["termination"] = state.termination
-    run_context["progress"] = {
-        "completed": completed,
-        "completed_groups": state.completed_groups,
-        "total_groups": total_groups,
-    }
 
     write_run_context(out_dir / "run.json", run_context)

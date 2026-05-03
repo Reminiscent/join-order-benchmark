@@ -46,14 +46,14 @@ Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 
 1. Resolve the scenario, datasets, variants, and query list.
 2. Check that benchmark databases are reachable and required GUCs exist.
-3. For a fresh run, stabilize each prepared database with
-   `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.
+3. Stabilize each prepared database with `VACUUM FREEZE ANALYZE` and a
+   best-effort `CHECKPOINT`.
 4. Write the initial `run.json` so the intended run shape is visible even if
    the process is interrupted.
 5. For each query group, run discarded warmup pass(es), then measured
    repetitions.
-6. Rewrite `run.json`, `raw.csv`, and `summary.csv` after each complete warmup
-   or measured group.
+6. Rewrite `run.json`, `raw.csv`, and `summary.csv` as each group finishes, or
+   before exiting on a fatal error.
 
 [bench/bench_run.py](bench/bench_run.py) is the execution driver.  It keeps the
 main run loop ordered by dataset, query, warmup pass, repetition, and variant.
@@ -65,8 +65,7 @@ These values define the public benchmark protocol:
 - 3 measured repetitions per selected query and variant.
 - 1 discarded warmup pass per query group.
 - Variant order rotates across query groups and repetitions.
-- Fresh runs refresh table statistics before any query runs.
-- Resumed runs reuse the existing statistics snapshot from the partial artifact.
+- Each run refreshes table statistics before any query runs.
 - `statement_timeout` defaults to `600000 ms`.
 - Non-timeout warmup or measured errors terminate the run after current
   artifacts are written.
@@ -126,18 +125,15 @@ References:
 - PostgreSQL `EXPLAIN` command reference:
   <https://www.postgresql.org/docs/current/sql-explain.html>
 
-## Timeout And Resume
+## Timeout Handling
 
 If warmup for a `(dataset, query, variant)` tuple hits `statement_timeout`, the
 later measured repetitions for the same tuple are recorded as skipped timeout
 rows instead of re-running the same timeout-prone statement.  A measured
 `statement_timeout` is recorded as a benchmark result.
 
-Resume uses `--resume-run-id <run_id>` and continues from the next unfinished
-safe group boundary.  The runner checkpoints only after complete warmup groups
-and complete measured groups, so resume never starts from the middle of a
-query's variant set.  Resume does not re-run database stabilization, which keeps
-the completed and resumed portions on the same statistics snapshot.
+Warmup errors and measured non-timeout errors stop the command after the current
+artifacts are written.  Use a new run if the benchmark process is interrupted.
 
 ## Artifacts
 

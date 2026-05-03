@@ -29,20 +29,15 @@ For example:
 outputs/20260412_142110_777847_main/
 ```
 
-When `--resume-run-id` is used, the same directory is reused and rewritten from
-the saved progress boundary.  The harness checkpoints after complete warmup
-groups and complete measured groups, so resume does not continue from the middle
-of a query group's variant set.
-
 ## Console Output
 
-During a run, the harness prints progress and the output directory:
+During a run, the harness prints status and the output directory:
 
 ```text
 [run] scenario=main
 [run] variants=dp,geqo,my_algo
 [run] warmup_passes=1 measured_reps=3
-[run] outputs=outputs/20260412_142110_777847_main
+[run] outputs=/path/to/join_order_benchmark/outputs/20260412_142110_777847_main
 [run] dataset=job db=imdb_bench queries=113 variants=dp,geqo,my_algo max_join=None
 [run] dataset=job_complex db=imdb_bench queries=30 variants=dp,geqo,my_algo max_join=None
 [run] completed without errors
@@ -80,17 +75,11 @@ Important fields:
 | `tag` | Optional user-provided build or patch label. |
 | `warmup_failures` | Warmup timeout/error records, if any. |
 | `termination` | Fatal termination record, if the run stopped early. |
-| `progress` | Resume state and whether the run completed. |
 
 Use `run.json` when a reviewer needs to check which scenario, variants,
-datasets, adjustable timeout, and resume state produced a result table.  The run
-protocol is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) rather than
-repeated in each run context.
-
-`progress` is intentionally compact.  It records whether the run completed, how
-many checkpointable groups have completed, and the total group count.  It does
-not list every completed SQL/repetition pair; resume derives the next boundary
-from the fixed run order.
+datasets, and adjustable timeout produced a result table.  The run protocol is
+documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) rather than repeated in
+each run context.
 
 Restart-required cluster settings, such as `shared_buffers`, are not changed by
 the harness and should be recorded with the published result set when they
@@ -141,7 +130,7 @@ Columns:
 | `total_ms_median` | Median `total_ms` over successful measured repetitions. |
 | `plan_total_cost_median` | Median `plan_total_cost` over successful measured repetitions. |
 | `ok_reps` | Number of successful measured repetitions. |
-| `err_reps` | Number of timeout measured repetitions, plus any fatal error row in a partial artifact. |
+| `err_reps` | Number of measured rows for this query/variant whose status is not `ok`. |
 
 If a query/variant has no successful measured repetition, the median columns are
 empty and `ok_reps` is `0`.

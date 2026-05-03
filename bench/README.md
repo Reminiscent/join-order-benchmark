@@ -13,7 +13,7 @@ Read these files first:
    dataset/query resolution, query-manifest access, and SQL wrapping.
 3. [bench_run.py](bench_run.py): measured run orchestration, including output
    directory setup, database checks, statistics stabilization, warmup/measured
-   group execution, resume, and artifact flushes.
+   group execution, and artifact flushes.
 4. [bench_exec.py](bench_exec.py): one PostgreSQL statement execution path.  Its
    main entry point is `run_one_statement()`, which builds the session prelude,
    runs `EXPLAIN ANALYZE` JSON, parses timing/cost fields, and classifies
