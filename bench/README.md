@@ -1,65 +1,79 @@
 # Benchmark Harness Modules
 
-This directory contains the Python benchmark harness.  The code is intentionally
-split by workflow step so benchmark protocol, data preparation, execution, and
-reviewer-table generation can be reviewed independently.
+This directory contains the Python benchmark harness.  For a reviewer checking
+how benchmark results were produced, the two key implementation files are
+[bench_run.py](bench_run.py) and [bench_exec.py](bench_exec.py).  Most other
+files support setup, artifact writing, or optional reviewer-table rendering.
 
-## Main Ideas
+## Reviewer Reading Path
 
-The harness follows four steps:
+Start with [../BENCHMARK_RUNS.md](../BENCHMARK_RUNS.md) for the public run
+protocol, then read [bench_run.py](bench_run.py) for run orchestration and
+[bench_exec.py](bench_exec.py) for PostgreSQL session execution.
 
-1. Choose the test scope: scenario, dataset, and query.
-2. Choose the algorithm configuration: variant and PostgreSQL GUCs.
-3. Execute the benchmark: prepare databases, then collect planning and execution
-   metrics with `EXPLAIN ANALYZE`.
-4. Produce reviewer-facing results: write `summary.csv`, then render reviewer
-   tables when needed.
+[bench_run.py](bench_run.py) owns the run orchestration:
 
-Most users only need [bench.py](bench.py).  Scenarios and portable baseline
-variants are built in; [../examples/variants.toml](../examples/variants.toml)
-shows how to add patch-specific variants.
+1. Check prepared databases, required PostgreSQL GUCs, and resume context before
+   executing queries.
+2. Stabilize each prepared database for a new run; `--resume-run-id` keeps the
+   existing statistics snapshot.
+3. Resolve the full dataset/query/variant plan before execution and write the
+   initial `run.json`.
+4. Execute discarded warmup groups and measured repetitions, rotating variant
+   order across query groups.
+5. Checkpoint `run.json`, `raw.csv`, and `summary.csv` after complete warmup
+   groups and complete measured groups.
+6. Record timeout/error rows and rebuild progress from artifacts when resuming.
 
-## Files
+Then read [bench_exec.py](bench_exec.py) for the single-statement execution
+mechanics:
+
+1. Build a clean session prelude with `RESET ALL`, `statement_timeout`, scenario
+   GUCs, variant GUCs, and supported optional variant GUCs.
+2. Run `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)` for
+   each benchmark statement.
+3. Parse planning time, execution time, total time, and plan total cost from the
+   JSON result.
+4. Classify PostgreSQL `statement_timeout` separately from other errors.
+5. Check database reachability, validate mandatory GUCs, and stabilize prepared
+   databases for fresh runs.
+
+After those two files, the closest support file is:
+
+- [bench_results.py](bench_results.py): writes `raw.csv`, `summary.csv`, and
+  `run.json`, which are the durable run artifacts documented in
+  [../OUTPUTS.md](../OUTPUTS.md).
+
+## Supporting Files
 
 | File | Role |
 | --- | --- |
-| [bench.py](bench.py) | CLI entry point for `list`, `prepare`, and `run`.  It parses arguments, loads built-in scenarios and variant definitions, and dispatches to preparation or execution. |
-| [bench_common.py](bench_common.py) | Defines the records passed between modules, such as `Scenario`, `DatasetSpec`, `Variant`, and `QueryMeta`, plus repository paths and thin helpers for running `psql`, quoting SQL values, and exiting with benchmark errors. |
-| [bench_registry.py](bench_registry.py) | Built-in scenario and baseline variant definitions, plus the optional extra-variant TOML loader.  It resolves scenario defaults, explicit `--variants`, built-in dataset entries, and prepare targets. |
-| [bench_catalog.py](bench_catalog.py) | Dataset catalog and query manifest access.  It maps dataset ids to databases, prepare scripts, query SQL, join-size filters, and `SELECT count(*) FROM (...)` wrapping for synthetic workloads. |
-| [bench_prepare.py](bench_prepare.py) | Database preparation flow.  It creates or reuses benchmark databases, loads schema/data SQL, applies IMDB CSV variables, and checks prepared markers. |
-| [bench_exec.py](bench_exec.py) | Single-query execution.  It builds the per-run session prelude, executes `EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON)`, parses planning/execution metrics, handles timeouts, and runs stabilization SQL. |
-| [bench_run.py](bench_run.py) | Scenario execution driver.  It verifies prepared databases and required GUCs, resolves selected queries and variants, performs warmup and measured repetitions, rotates variant order, records timeout/error rows, checkpoints progress, and supports `--resume-run-id`. |
-| [bench_results.py](bench_results.py) | Artifact writer for `raw.csv`, `summary.csv`, and `run.json`.  It defines the durable per-run output contract used by reviewer tables. |
-| [bench_review_tables.py](bench_review_tables.py) | Optional reviewer table renderer used by [../tools/render_review_tables.py](../tools/render_review_tables.py).  It creates one styled XLSX workbook and CSV companion files with `dp`-based ratios. |
-
-The core benchmark path is `bench.py` -> `bench_registry.py` ->
-`bench_catalog.py` -> `bench_prepare.py` / `bench_run.py` ->
-`bench_exec.py` -> `bench_results.py`.  `bench_review_tables.py` is optional
-post-processing for community attachments and can be ignored when reviewing the
-run protocol itself.
+| [bench.py](bench.py) | Thin CLI entry point for `list`, `prepare`, and `run`. |
+| [bench_registry.py](bench_registry.py) | Built-in scenarios and baseline variants, plus extra-variant TOML loading and scenario resolution. |
+| [bench_catalog.py](bench_catalog.py) | Dataset catalog, query manifest access, SQL loading, and query wrapping for synthetic workloads. |
+| [bench_prepare.py](bench_prepare.py) | Database creation/loading and prepared-database checks. |
+| [bench_common.py](bench_common.py) | Shared records, paths, SQL quoting helpers, and `psql` command helpers. |
+| [bench_review_tables.py](bench_review_tables.py) | Optional post-processing for reviewer XLSX/CSV tables; not needed to review the run protocol. |
 
 ## Data Flow
 
 ```text
-built-in scenarios + built-in/extra variants
-        |
-        v
-bench_registry.py
-        |
-        v
-bench_prepare.py  -> prepared PostgreSQL databases
-        |
-        v
-bench_run.py -> bench_exec.py
-        |
-        v
-bench_results.py -> outputs/<run_id>/{run.json,raw.csv,summary.csv}
-        |
-        v
-bench_review_tables.py -> reviewer-facing XLSX/CSV tables
+bench.py run
+    -> bench_registry.py / bench_catalog.py
+    -> bench_run.py
+        -> bench_exec.py
+        -> bench_results.py
+    -> outputs/<run_id>/{run.json,raw.csv,summary.csv}
 ```
 
-The benchmark protocol itself is described in [../BENCHMARK_RUNS.md](../BENCHMARK_RUNS.md).
+Prepare is a separate setup path:
+
+```text
+bench.py prepare
+    -> bench_registry.py / bench_catalog.py
+    -> bench_prepare.py
+    -> prepared PostgreSQL databases
+```
+
 Scenario and dataset coverage is described in [../WORKLOADS.md](../WORKLOADS.md).
-Output formats are described in [../OUTPUTS.md](../OUTPUTS.md).
+Extra variant file fields are described in [../examples/README.md](../examples/README.md).
