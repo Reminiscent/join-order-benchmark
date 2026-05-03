@@ -14,6 +14,7 @@ from bench_catalog import (
     print_variants,
     resolve_dataset_runs,
     resolve_variant_names,
+    resolve_variants_file,
 )
 from bench_prepare import prepare_scenario
 from bench_run import run_scenario
@@ -35,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
             "--variants-file",
             type=Path,
             default=None,
-            help="extra variant TOML file for patch-specific algorithms",
+            help="override the default examples/variants.toml extra variant file",
         )
 
     ap_list = sub.add_parser("list", help="List scenarios, variants, or datasets.")
@@ -88,8 +89,9 @@ def main() -> None:
             print_scenarios(scenarios)
             return
         if args.what == "variants":
-            variants = load_variants(args.variants_file)
-            print_variants(variants)
+            variants_file = resolve_variants_file(args.variants_file)
+            variants = load_variants(variants_file)
+            print_variants(variants, variants_file)
             return
         if args.what == "datasets":
             print_datasets()

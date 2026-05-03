@@ -57,6 +57,7 @@ PREPARE_MARKERS = {
 }
 
 SELECT5_HEADER_RE = re.compile(r"^--\s*query\s+(\d+)\s+\((.*?)\)\s*$", flags=re.IGNORECASE)
+DEFAULT_VARIANTS_FILE = REPO_ROOT / "examples" / "variants.toml"
 
 DEFAULT_SCENARIO_VARIANTS = ("dp", "geqo")
 DEFAULT_STATEMENT_TIMEOUT_MS = 600000
@@ -112,12 +113,21 @@ def built_in_scenario(
     )
 
 
+def resolve_variants_file(path: Optional[Path] = None) -> Optional[Path]:
+    if path is not None:
+        return Path(path)
+    if DEFAULT_VARIANTS_FILE.is_file():
+        return DEFAULT_VARIANTS_FILE
+    return None
+
+
 def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
     out = {variant.name: variant for variant in BUILT_IN_VARIANTS}
-    if path is None:
+    variants_path = resolve_variants_file(path)
+    if variants_path is None:
         return out
 
-    variants_path = Path(path)
+    variants_path = Path(variants_path)
     if not variants_path.is_file():
         die(f"missing variants file: {variants_path}")
     data = tomllib.loads(variants_path.read_text())
@@ -237,24 +247,52 @@ def resolve_prepare_dataset_runs(
 
 
 def print_scenarios(scenarios: dict[str, Scenario]) -> None:
+    print("Scenarios")
+    print("name\tdefault_variants\tdatasets\tdescription")
     for name, scenario in scenarios.items():
         dataset_names = list(dict.fromkeys(spec.dataset for spec in scenario.datasets))
         datasets = ", ".join(dataset_names)
         print(
-            f"{name}\t{scenario.description}\t"
-            f"variants={','.join(scenario.default_variants)}\tdatasets={datasets}"
+            f"{name}\t{','.join(scenario.default_variants)}\t"
+            f"{datasets}\t{scenario.description}"
         )
+    print()
 
 
-def print_variants(variants: dict[str, Variant]) -> None:
+def display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def print_variants(
+    variants: dict[str, Variant],
+    variants_file: Optional[Path] = None,
+) -> None:
+    built_in_names = {variant.name for variant in BUILT_IN_VARIANTS}
+    print("Variants")
+    if variants_file is not None:
+        print(f"extra_variants_file\t{display_path(variants_file)}")
+    print("name\tsource\tlabel")
     for name in sorted(variants):
         variant = variants[name]
-        print(f"{variant.name}\t{variant.label}")
+        source = "builtin" if name in built_in_names else "extra"
+        print(f"{variant.name}\t{source}\t{variant.label}")
+    if set(variants) == built_in_names:
+        print(
+            f"Hint: {display_path(DEFAULT_VARIANTS_FILE)} was not found; "
+            "pass --variants-file PATH to include patch-specific variants."
+        )
+    print()
 
 
 def print_datasets() -> None:
+    print("Datasets")
+    print("name\tdatabase")
     for dataset in available_datasets():
-        print(dataset)
+        print(f"{dataset}\t{dataset_db_name(dataset)}")
+    print()
 
 
 @functools.lru_cache(maxsize=1)

@@ -17,10 +17,12 @@ python3 bench/bench.py list variants
 ```
 
 `list scenarios` shows workload groups such as `main`, `extended`, and `full`.
-`list datasets` shows individual query/data sources.  `list variants` shows the
-available algorithm/configuration choices, including any extra variants loaded
-from `--variants-file`.  The `prepare` and `run` subcommands are described in
-the following phases.
+`list datasets` shows individual query/data sources and their target database
+names.  `list variants` shows built-in variants plus
+`examples/variants.toml` when that default file exists; pass `--variants-file`
+only to use a different extra variant file.  Edit `examples/variants.toml`
+directly to change the repository's default extra variants.  The `prepare` and
+`run` subcommands are described in the following phases.
 
 ## Prepare Phase
 
@@ -51,20 +53,21 @@ Run with portable baselines:
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-Use an extra variants file when comparing a patch-specific algorithm:
+Use the default extra variants file when comparing a patch-specific algorithm:
 
 ```bash
-python3 bench/bench.py run main \
-  --variants-file path/to/variants.toml \
-  --variants dp,geqo,my_algo
+python3 bench/bench.py run main --variants dp,geqo,goo_cost
 ```
 
 `bench.py run <scenario>` performs these steps:
 
 1. Resolve the selected built-in scenario.  For example, `main` selects the
    complete `job` and `job_complex` query suites.
-2. Load built-in variants plus any variants from `--variants-file`, then choose
-   the explicit `--variants` list or the scenario's default `dp,geqo` list.
+2. Load built-in variants plus the default `examples/variants.toml` entries
+   when that file exists, unless `--variants-file` points to a different TOML
+   file.  To adjust the default extra variant definitions, edit
+   `examples/variants.toml` directly.  Then choose the explicit `--variants`
+   list or the scenario's default `dp,geqo` list.
 3. Build concrete dataset runs, including any scenario-defined limits.  For
    example, `extended` and `full` run non-`dp` variants on the complete
    `gpuqo_clique_small` workload, while limiting `dp` to queries with at most

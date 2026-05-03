@@ -50,8 +50,11 @@ and the benchmark databases during prepare and run.
 
 ## 2. Variants
 
-The portable baseline variants `dp` and `geqo` are built in.  Extra variants are
-only needed when testing a patch-specific algorithm or parameter set.
+The portable baseline variants `dp` and `geqo` are built in.  The default extra
+variant file is `examples/variants.toml` when that file exists.  Pass
+`--variants-file` only when using a different TOML file for a patch-specific
+algorithm or parameter set.  To change the default extra variants for this
+repository, edit `examples/variants.toml` directly.
 
 Inspect the active variants:
 
@@ -59,10 +62,10 @@ Inspect the active variants:
 python3 bench/bench.py list variants
 ```
 
-Inspect built-ins plus extra example variants:
+Inspect variants from a different extra file:
 
 ```bash
-python3 bench/bench.py list variants --variants-file examples/variants.toml
+python3 bench/bench.py list variants --variants-file path/to/variants.toml
 ```
 
 If `--variants` is omitted, the selected scenario uses the built-in `dp` and
@@ -120,9 +123,7 @@ python3 bench/bench.py run main --variants dp,geqo
 Run with an extra variant set:
 
 ```bash
-python3 bench/bench.py run main \
-  --variants-file path/to/variants.toml \
-  --variants dp,geqo,my_algo
+python3 bench/bench.py run main --variants dp,geqo,goo_cost
 ```
 
 ## 6. Extended And Full Runs
@@ -204,7 +205,7 @@ adjustable from this command.
 
 | Option | Use |
 | --- | --- |
-| `--variants-file` | add patch-specific variants from a TOML file |
+| `--variants-file` | override the default `examples/variants.toml` extra variant file |
 | `--variants` | choose the variants and display/order them explicitly |
 | `--resume-run-id` | continue an interrupted run from a safe boundary |
 | `--statement-timeout-ms` | adjust the guardrail timeout for very slow or very fast machines |
@@ -214,17 +215,16 @@ Resume an interrupted run by passing the output directory name:
 
 ```bash
 python3 bench/bench.py run main \
-  --variants dp,geqo,my_algo \
-  --variants-file path/to/variants.toml \
+  --variants dp,geqo,goo_cost \
   --resume-run-id 20260412_142110_777847_main
 ```
 
-Use the same scenario, variant list, variants file, connection flags, tag, and
-statement timeout as the original run.  The resume id is the directory name
-under `outputs/`.  The harness validates the run context and continues from the
-next unfinished safe group boundary.  Resume does not re-run database
-stabilization, so it does not intentionally replace the statistics snapshot
-used by earlier completed groups.
+Use the same scenario, variant list, extra variants file if overridden,
+connection flags, tag, and statement timeout as the original run.  The resume id
+is the directory name under `outputs/`.  The harness validates the run context
+and continues from the next unfinished safe group boundary.  Resume does not
+re-run database stabilization, so it does not intentionally replace the
+statistics snapshot used by earlier completed groups.
 
 `--statement-timeout-ms` is not an algorithm knob.  It only limits how long a
 single bad plan can occupy the run.  If it differs from the default

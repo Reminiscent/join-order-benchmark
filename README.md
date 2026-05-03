@@ -20,7 +20,7 @@ documents how those tables were produced.
 | --- | --- |
 | What was tested first? | `main` is the primary validation scenario.  It runs the complete JOB and JOB-Complex workloads. |
 | Which broader workloads are included? | `extended` adds small-data planning/search-space stress workloads; `full` adds the heavier CEB IMDB 3k subset.  See [WORKLOADS.md](WORKLOADS.md). |
-| Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an optional `--variants-file` and explicit `--variants` list. |
+| Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Patch-specific examples live in `examples/variants.toml`; edit that file to change the default extra variants, or use `--variants-file` to override the default with another file. |
 | How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) describes the public run protocol: prepare data, stabilize tables, warm up, measure, handle timeouts, and write artifacts. |
 | How can I reproduce it? | [REPRODUCE.md](REPRODUCE.md) is the command-oriented reproduction guide. |
 
@@ -53,13 +53,10 @@ python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-Run a patch-specific algorithm by passing an extra variants file and an explicit
-variant set:
+Run a patch-specific algorithm from the default extra variants file:
 
 ```bash
-python3 bench/bench.py run main \
-  --variants-file path/to/variants.toml \
-  --variants dp,geqo,my_algo
+python3 bench/bench.py run main --variants dp,geqo,goo_cost
 ```
 
 See [REPRODUCE.md](REPRODUCE.md) for the full command flow, connection flags,

@@ -4,15 +4,16 @@ The portable `dp` and `geqo` baseline variants are built into `bench.py`.
 `variants.toml` is an example extra variant file for experiment-specific
 variants such as GOO or hybrid search settings.
 
-The built-in scenarios default to the portable baselines.  Pass
-`--variants-file` plus `--variants` when a submitted benchmark compares
-additional algorithms.
+The built-in scenarios default to the portable baselines.  The CLI automatically
+loads `examples/variants.toml` when this file exists, so pass `--variants-file`
+only when using a different TOML file.  To change the default extra variants,
+edit `examples/variants.toml` directly.
 
-Use an extra variant file with:
+Use the default extra variants with:
 
 ```bash
-python3 bench/bench.py list variants --variants-file path/to/variants.toml
-python3 bench/bench.py run main --variants-file path/to/variants.toml --variants dp,geqo,my_algo
+python3 bench/bench.py list variants
+python3 bench/bench.py run main --variants dp,geqo,goo_cost
 ```
 
 Each `[[variant]]` entry supports:

@@ -4,12 +4,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_common import DatasetSpec, Scenario
+import bench_catalog
 from bench_catalog import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
 
 
@@ -28,8 +30,18 @@ class BenchCatalogTests(unittest.TestCase):
             ),
         )
 
-    def test_load_variants_uses_built_in_baselines(self) -> None:
+    def test_load_variants_uses_default_extra_file_when_present(self) -> None:
         variants = load_variants()
+
+        self.assertIn("dp", variants)
+        self.assertIn("geqo", variants)
+        self.assertIn("goo_cost", variants)
+
+    def test_load_variants_uses_built_ins_when_default_extra_file_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_path = Path(tmpdir) / "missing.toml"
+            with patch.object(bench_catalog, "DEFAULT_VARIANTS_FILE", missing_path):
+                variants = load_variants()
 
         self.assertEqual(tuple(variants), ("dp", "geqo"))
 
