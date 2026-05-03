@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_common import DatasetSpec, Scenario
-from bench_registry import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
+from bench_catalog import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
 
 
-class BenchRegistryTests(unittest.TestCase):
+class BenchCatalogTests(unittest.TestCase):
     def make_scenario(self) -> Scenario:
         return Scenario(
             name="full",

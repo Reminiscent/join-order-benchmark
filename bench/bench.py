@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 
 from bench_common import ConnOpts, die
-from bench_registry import (
+from bench_catalog import (
     load_scenarios,
     load_variants,
     print_datasets,
@@ -71,11 +71,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="override the per-statement guardrail timeout in milliseconds",
     )
     ap_run.add_argument("--tag", default="", help="optional local tag for this run or the build under test")
-    ap_run.add_argument(
-        "--fail-on-error",
-        action="store_true",
-        help="exit non-zero if any non-timeout query errors occur",
-    )
     add_conn_args(ap_run)
 
     ap.set_defaults(_scenarios=scenarios)
@@ -135,7 +130,6 @@ def main() -> None:
             ),
             resume_run_id=args.resume_run_id,
             tag=args.tag,
-            fail_on_error=args.fail_on_error,
         )
         return
 

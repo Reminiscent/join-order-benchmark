@@ -71,7 +71,7 @@ Run outputs are local and ignored by git.  They are mainly for auditability and
 for producing the separate result tables posted to the community thread.
 
 Each `run` creates `outputs/<run_id>/` with `run.json`, `raw.csv`, and
-`summary.csv`.  Reviewer-facing Excel/CSV tables can be rendered from
+`summary.csv`.  A reviewer-facing `review.xlsx` workbook can be rendered from
 `summary.csv` with [tools/render_review_tables.py](tools/render_review_tables.py).
 The full artifact layout and table format are documented in [OUTPUTS.md](OUTPUTS.md).
 

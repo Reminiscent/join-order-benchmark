@@ -170,8 +170,8 @@ reviewer-table examples are documented in [OUTPUTS.md](OUTPUTS.md).
 ## 8. Reviewer Tables
 
 Use `tools/render_review_tables.py` to create per-query tables for community
-attachments from an existing `outputs/<run_id>/` directory.  The script writes a
-styled XLSX workbook and CSV companion files.
+attachments from an existing `outputs/<run_id>/` directory.  The script writes
+`outputs/<run_id>/review.xlsx`.
 
 This step is optional.  It uses `XlsxWriter`, which is not needed for benchmark
 prepare/run:
@@ -192,8 +192,8 @@ workbook contains one execution-time sheet and one planning-time sheet, with
 Execution time is the primary result; planning time is reported separately as a
 diagnostic.
 
-The exact workbook layout, CSV headers, `SUM` row semantics, and ratio color
-rules are documented in [OUTPUTS.md](OUTPUTS.md).
+The exact workbook layout, `SUM` row semantics, and ratio color rules are
+documented in [OUTPUTS.md](OUTPUTS.md).
 
 ## 9. CLI Options
 
@@ -209,7 +209,6 @@ adjustable from this command.
 | `--resume-run-id` | continue an interrupted run from a safe boundary |
 | `--statement-timeout-ms` | adjust the guardrail timeout for very slow or very fast machines |
 | `--tag` | record a local build or patch label in `run.json` |
-| `--fail-on-error` | exit non-zero on non-timeout query errors |
 
 Resume an interrupted run by passing the output directory name:
 

@@ -76,6 +76,8 @@ The public benchmark protocol uses these values during `bench.py run`:
 - If a warmup execution hits `statement_timeout`, later measured repetitions
   for the same `(dataset, query, variant)` are recorded as skipped timeout rows
   instead of re-running the same timeout-prone statement.
+- Non-timeout warmup or measured errors terminate the run after writing the
+  current artifacts.
 
 The run command accepts `--statement-timeout-ms` for the guardrail timeout.
 Measured repetitions, warmup count, stabilization behavior, and variant-order

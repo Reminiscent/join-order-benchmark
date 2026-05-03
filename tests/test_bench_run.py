@@ -112,7 +112,7 @@ class RunScenarioTests(unittest.TestCase):
     def read_run_context(self, run_dir: Path) -> dict[str, object]:
         return json.loads((run_dir / "run.json").read_text())
 
-    def test_warmup_timeout_is_skipped_even_with_fail_on_error(self) -> None:
+    def test_warmup_timeout_is_skipped_without_treating_timeout_as_fatal(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
@@ -132,7 +132,6 @@ class RunScenarioTests(unittest.TestCase):
                 statement_timeout_ms=1000,
                 resume_run_id=None,
                 tag="",
-                fail_on_error=True,
             )
 
             run_dir = self.only_run_dir(outputs_dir)
@@ -144,7 +143,7 @@ class RunScenarioTests(unittest.TestCase):
             self.assertEqual(run_context["warmup_failures"][0]["category"], "statement_timeout")
             self.assertNotIn("termination", run_context)
 
-    def test_measured_timeout_does_not_trigger_fail_on_error_exit(self) -> None:
+    def test_measured_timeout_does_not_abort_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
@@ -163,7 +162,6 @@ class RunScenarioTests(unittest.TestCase):
                 statement_timeout_ms=1000,
                 resume_run_id=None,
                 tag="",
-                fail_on_error=True,
             )
 
             run_dir = self.only_run_dir(outputs_dir)
@@ -192,7 +190,6 @@ class RunScenarioTests(unittest.TestCase):
                     statement_timeout_ms=1000,
                     resume_run_id=None,
                     tag="",
-                    fail_on_error=True,
                 )
 
             self.assertEqual(ctx.exception.code, 1)
@@ -223,13 +220,67 @@ class RunScenarioTests(unittest.TestCase):
                     statement_timeout_ms=1000,
                     resume_run_id=None,
                     tag="",
-                    fail_on_error=True,
                 )
 
             self.assertEqual(ctx.exception.code, 1)
             run_dir = self.only_run_dir(outputs_dir)
+            run_context = self.read_run_context(run_dir)
             raw_rows = self.read_raw_rows(run_dir)
+            self.assertEqual(run_context["termination"]["phase"], "measured")
+            self.assertEqual(run_context["termination"]["category"], "error")
             self.assertEqual(len(raw_rows), 1)
+            self.assertEqual(raw_rows[0]["status"], "error")
+
+    def test_measured_non_timeout_error_stops_current_group(self) -> None:
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
+        variants = {
+            "dp": Variant(name="dp", label="DP", session_gucs=()),
+            "geqo": Variant(name="geqo", label="GEQO", session_gucs=()),
+        }
+        resolved_runs = [
+            ResolvedDatasetRun(
+                dataset="job",
+                db="bench_job",
+                max_join=None,
+                variants=("dp", "geqo"),
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            run_one_mock, _ = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                [RuntimeError("ERROR: planner blew up"), metrics],
+            )
+
+            with self.assertRaises(SystemExit) as ctx:
+                bench_run.run_scenario(
+                    self.make_scenario(),
+                    variants,
+                    ("dp", "geqo"),
+                    resolved_runs,
+                    conn=None,
+                    statement_timeout_ms=1000,
+                    resume_run_id=None,
+                    tag="",
+                )
+
+            self.assertEqual(ctx.exception.code, 1)
+            self.assertEqual(run_one_mock.call_count, 1)
+            run_dir = self.only_run_dir(outputs_dir)
+            run_context = self.read_run_context(run_dir)
+            raw_rows = self.read_raw_rows(run_dir)
+            self.assertEqual(run_context["progress"]["completed_groups"], 0)
+            self.assertEqual(run_context["progress"]["total_groups"], 1)
+            self.assertEqual(len(raw_rows), 1)
+            self.assertEqual(raw_rows[0]["variant"], "dp")
             self.assertEqual(raw_rows[0]["status"], "error")
 
     def test_warmup_timeout_records_measured_timeout_rows_without_rerun(self) -> None:
@@ -253,7 +304,6 @@ class RunScenarioTests(unittest.TestCase):
                 statement_timeout_ms=1000,
                 resume_run_id=None,
                 tag="",
-                fail_on_error=True,
             )
 
             self.assertEqual(run_one_mock.call_count, 1)
@@ -270,6 +320,8 @@ class RunScenarioTests(unittest.TestCase):
             )
             self.assertEqual(run_context["statement_timeout_ms"], 1000)
             self.assertNotIn("protocol", run_context)
+            self.assertEqual(run_context["progress"]["completed_groups"], 3)
+            self.assertEqual(run_context["progress"]["total_groups"], 3)
 
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")
@@ -300,7 +352,6 @@ class RunScenarioTests(unittest.TestCase):
                 statement_timeout_ms=1000,
                 resume_run_id=None,
                 tag="",
-                fail_on_error=True,
             )
 
             self.assertEqual(run_one_mock.call_count, 6)
@@ -342,7 +393,6 @@ class RunScenarioTests(unittest.TestCase):
                         statement_timeout_ms=1000,
                         resume_run_id=None,
                         tag="resume",
-                        fail_on_error=True,
                     )
                 self.assertEqual(run_one_mock.call_count, 2)
                 stabilize_mock.assert_called_once_with("bench_job", None)
@@ -371,7 +421,6 @@ class RunScenarioTests(unittest.TestCase):
                     statement_timeout_ms=1000,
                     resume_run_id=run_dir.name,
                     tag="resume",
-                    fail_on_error=True,
                 )
                 self.assertEqual(run_one_mock.call_count, 1)
                 stabilize_mock.assert_not_called()
@@ -380,6 +429,8 @@ class RunScenarioTests(unittest.TestCase):
             self.assertEqual([row["query_id"] for row in raw_rows], ["q1", "q2"])
             run_context = self.read_run_context(run_dir)
             self.assertTrue(run_context["progress"]["completed"])
+            self.assertEqual(run_context["progress"]["completed_groups"], 2)
+            self.assertEqual(run_context["progress"]["total_groups"], 2)
 
     def test_resume_run_id_restores_warmup_timeout_skip_state(self) -> None:
         q1 = self.make_query_with_id("q1")
@@ -408,16 +459,13 @@ class RunScenarioTests(unittest.TestCase):
                         statement_timeout_ms=1000,
                         resume_run_id=None,
                         tag="resume-warmup",
-                        fail_on_error=True,
                     )
                 self.assertEqual(run_one_mock.call_count, 2)
 
             run_dir = self.only_run_dir(outputs_dir)
             run_context = self.read_run_context(run_dir)
-            self.assertEqual(
-                run_context["progress"]["completed_warmup_groups"],
-                [{"warmup_pass": 1, "dataset": "job", "query_id": "q1"}],
-            )
+            self.assertEqual(run_context["progress"]["completed_groups"], 2)
+            self.assertEqual(run_context["progress"]["total_groups"], 4)
 
             with ExitStack() as stack:
                 run_one_mock, _ = self.patch_run_environment(
@@ -441,7 +489,6 @@ class RunScenarioTests(unittest.TestCase):
                     statement_timeout_ms=1000,
                     resume_run_id=run_dir.name,
                     tag="resume-warmup",
-                    fail_on_error=True,
                 )
                 self.assertEqual(run_one_mock.call_count, 2)
 

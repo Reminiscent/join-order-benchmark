@@ -56,8 +56,9 @@ If failures occur, the harness prints grouped summaries such as:
 [run] completed with non-fatal failures
 ```
 
-With `--fail-on-error`, a warmup error or measured non-timeout error makes the
-command exit non-zero after writing the current artifacts.
+A warmup error or measured non-timeout error makes the command exit non-zero
+after writing the current artifacts.  `statement_timeout` rows remain non-fatal
+because they are benchmark guardrail results.
 
 ## `run.json`
 
@@ -83,6 +84,12 @@ Use `run.json` when a reviewer needs to check which scenario, variants,
 datasets, adjustable timeout, and resume state produced a result table.  The run
 protocol is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) rather than
 repeated in each run context.
+
+`progress` is intentionally compact.  It records whether the run completed, how
+many checkpointable groups have completed, and the total group count.  It does
+not list every completed SQL/repetition pair; resume derives the next boundary
+from the fixed run order.
+
 Restart-required cluster settings, such as `shared_buffers`, are not changed by
 the harness and should be recorded with the published result set when they
 matter for review.
@@ -132,7 +139,7 @@ Columns:
 | `total_ms_median` | Median `total_ms` over successful measured repetitions. |
 | `plan_total_cost_median` | Median `plan_total_cost` over successful measured repetitions. |
 | `ok_reps` | Number of successful measured repetitions. |
-| `err_reps` | Number of timeout/error measured repetitions. |
+| `err_reps` | Number of timeout measured repetitions, plus any fatal error row in a partial artifact. |
 
 If a query/variant has no successful measured repetition, the median columns are
 empty and `ok_reps` is `0`.
@@ -147,13 +154,10 @@ Reviewer tables are generated explicitly from an existing run directory:
 python3 tools/render_review_tables.py outputs/<run_id>
 ```
 
-The command writes one combined workbook and two CSV companions:
+The command writes one combined workbook into the run directory:
 
 ```text
-outputs/<run_id>/review_tables/
-  review.xlsx
-  review_execution.csv
-  review_planning.csv
+outputs/<run_id>/review.xlsx
 ```
 
 The XLSX workbook contains two sheets:
@@ -163,10 +167,7 @@ The XLSX workbook contains two sheets:
 
 The workbook is the reviewer-facing attachment: it has frozen headers, grouped
 metric and ratio columns, number formats, a `SUM` row, and ratio colors.  The
-CSV files contain the same table values without workbook styling, so they are
-easy to inspect with text tools or import into other analysis scripts.
-The XLSX export uses optional `XlsxWriter`; benchmark prepare/run does not need
-it.
+XLSX export uses optional `XlsxWriter`; benchmark prepare/run does not need it.
 
 Reviewer tables require `dp` in the selected variant list.  Ratios are direct
 `variant/dp` ratios.  Execution time is the primary result; planning time is a
@@ -200,17 +201,7 @@ GEQO/DP SUM = (260.00 + 110.00) / (200.00 + 100.00) = 1.23
 My Algorithm/DP SUM = (150.00 + 80.00) / (200.00 + 100.00) = 0.77
 ```
 
-The CSV companion uses the same values without workbook styling:
-
-```csv
-dataset,query,join_size,dp_execution_ms_median,geqo_execution_ms_median,my_algo_execution_ms_median,geqo_to_dp,my_algo_to_dp
-job,2a,12,200,260,150,1.3,0.75
-job,10a,7,100,110,80,1.1,0.8
-SUM,,,300,370,230,1.23,0.77
-```
-
-The planning CSV and planning sheet use the same layout with
-`planning_ms_median` values.
+The planning sheet uses the same layout with `planning_ms_median` values.
 
 ### Ratio Colors
 

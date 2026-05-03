@@ -364,28 +364,6 @@ def build_review_table(
     )
 
 
-def render_review_table_csv(table: ReviewTable) -> str:
-    from io import StringIO
-
-    out = StringIO()
-    writer = csv.writer(out, lineterminator="\n")
-    header = ["dataset", "query", "join_size"]
-    header.extend([f"{variant}_{table.metric_column}" for variant in table.variants])
-    header.extend([f"{variant}_to_{table.reference}" for variant in table.variants if variant != table.reference])
-    writer.writerow(header)
-    for row in table.rows:
-        cells: list[str] = [row.dataset, row.query_id, str(row.join_size)]
-        cells.extend(cell.text for cell in row.values.values())
-        cells.extend(cell.text for cell in row.ratios.values())
-        writer.writerow(cells)
-
-    total: list[str] = ["SUM", "", ""]
-    total.extend(cell.text for cell in table.total_values.values())
-    total.extend(cell.text for cell in table.total_ratios.values())
-    writer.writerow(total)
-    return out.getvalue()
-
-
 def sheet_name(raw: str, used: set[str]) -> str:
     base = re.sub(r"[][\\/*?:]", "_", raw).strip() or "sheet"
     base = base[:31]
@@ -628,10 +606,6 @@ def default_output_name() -> str:
     return safe_artifact_name("review")
 
 
-def default_csv_output_name(metric: str) -> str:
-    return safe_artifact_name(f"review_{metric}")
-
-
 def write_review_tables(
     *,
     run_dir: Path,
@@ -659,11 +633,7 @@ def write_review_tables(
 
     require_xlsxwriter()
 
-    out_dir = run_dir / "review_tables"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
     tables: list[ReviewTable] = []
-    written: list[Path] = []
     for metric in DEFAULT_METRICS:
         table = build_review_table(
             run_context=run_context,
@@ -674,10 +644,6 @@ def write_review_tables(
             variants_csv=variants_csv,
         )
         tables.append(table)
-        csv_path = out_dir / f"{default_csv_output_name(metric)}.csv"
-        csv_path.write_text(render_review_table_csv(table))
-        written.append(csv_path)
-    workbook_path = out_dir / f"{default_output_name()}.xlsx"
+    workbook_path = run_dir / f"{default_output_name()}.xlsx"
     write_review_workbook(workbook_path, tables)
-    written.insert(0, workbook_path)
-    return written
+    return [workbook_path]

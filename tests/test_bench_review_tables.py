@@ -30,6 +30,8 @@ class BenchReviewTablesTests(unittest.TestCase):
                     "variants": [
                         {"name": "dp", "label": "Dynamic Programming"},
                         {"name": "my_algo", "label": "My Algorithm"},
+                        {"name": "fast_algo", "label": "Fast Algorithm"},
+                        {"name": "bad_algo", "label": "Bad Algorithm"},
                     ],
                     "datasets": [{"dataset": "job"}, {"dataset": "job_complex"}],
                 }
@@ -42,6 +44,8 @@ class BenchReviewTablesTests(unittest.TestCase):
                     "dataset,query_id,join_size,variant,planning_ms_median,execution_ms_median,total_ms_median,plan_total_cost_median,ok_reps,err_reps",
                     "job,10a,7,dp,2.000,100.000,102.000,1000.000,3,0",
                     "job,10a,7,my_algo,1.000,80.000,81.000,900.000,3,0",
+                    "job,10a,7,fast_algo,0.500,40.000,40.500,900.000,3,0",
+                    "job,10a,7,bad_algo,30.000,1500.000,1530.000,900.000,3,0",
                     "job,2a,12,dp,4.000,200.000,204.000,1000.000,3,0",
                     "job,2a,12,my_algo,8.000,500.000,508.000,900.000,3,0",
                     "job_complex,1a,9,dp,3.000,300.000,303.000,1000.000,3,0",
@@ -53,7 +57,7 @@ class BenchReviewTablesTests(unittest.TestCase):
         return run_dir
 
     @unittest.skipUnless(HAS_XLSXWRITER, "XlsxWriter is optional and only needed for reviewer XLSX tables")
-    def test_renders_workbook_and_metric_csv_files(self) -> None:
+    def test_renders_review_workbook(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = self.make_run_dir(tmpdir)
 
@@ -62,10 +66,9 @@ class BenchReviewTablesTests(unittest.TestCase):
                 datasets=[],
             )
 
-            self.assertEqual(len(paths), 3)
-            workbook_path = run_dir / "review_tables" / "review.xlsx"
-            execution_csv = (run_dir / "review_tables" / "review_execution.csv").read_text()
-            planning_csv = (run_dir / "review_tables" / "review_planning.csv").read_text()
+            workbook_path = run_dir / "review.xlsx"
+            self.assertEqual(paths, [workbook_path])
+            self.assertFalse((run_dir / "review_tables").exists())
             with zipfile.ZipFile(workbook_path) as zf:
                 workbook_xml = zf.read("xl/workbook.xml").decode()
                 styles_xml = zf.read("xl/styles.xml").decode()
@@ -74,12 +77,6 @@ class BenchReviewTablesTests(unittest.TestCase):
         self.assertIn("planning", workbook_xml)
         self.assertIn("6AA84F", styles_xml)
         self.assertIn("CC0000", styles_xml)
-        self.assertIn("dataset,query,join_size", execution_csv)
-        self.assertIn("2a", execution_csv)
-        self.assertIn("job_complex,1a", execution_csv)
-        self.assertLess(execution_csv.index("2a"), execution_csv.index("10a"))
-        self.assertIn("SUM", planning_csv)
-        self.assertIn("my_algo_to_dp", planning_csv)
 
     def test_ratio_color_thresholds_match_documented_scale(self) -> None:
         cases = [
