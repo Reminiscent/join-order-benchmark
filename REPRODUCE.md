@@ -1,153 +1,123 @@
 # Reproduce
 
-This document describes the public reproduction flow for this benchmark
-repository.
+This is the command checklist for reproducing a public benchmark run.  For the
+runner protocol behind these commands, see [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
+For artifact formats and reviewer workbook details, see [OUTPUTS.md](OUTPUTS.md).
 
-This is a command-oriented guide.  For how the runner performs stabilization,
-warmup, variant rotation, timeout handling, and timing collection, see
-[BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
-
-## 1. Requirements
+## Requirements
 
 You need:
 
 - a reachable PostgreSQL instance
 - `psql` in `PATH`
 - Python 3.11 or newer
-- the external IMDB CSV bundle when preparing IMDB-backed datasets
+- the external IMDB CSV bundle for IMDB-backed workloads
 - a database role that can connect to the `postgres` maintenance database and
-  create the benchmark databases used by `prepare`
+  create benchmark databases
 
-The documented reproduction path is Python 3.11+ only.  No extra Python package
-is required for prepare or run on supported Python versions.
+Prepare and run do not require extra Python packages.  Rendering `review.xlsx`
+requires `XlsxWriter`.
 
-Following the public `shared_buffers=4GB` setup also requires either superuser
-access for `ALTER SYSTEM` or direct access to the PostgreSQL server
-configuration, followed by a server restart.
+For the public protocol, configure PostgreSQL with `shared_buffers=4GB` before
+running the benchmark:
 
-`prepare` and `run` both connect to PostgreSQL.  If a local PostgreSQL build is
-reachable through normal libpq defaults, no connection flags are needed.
+```sql
+ALTER SYSTEM SET shared_buffers = '4GB';
+```
 
-When the server uses a TCP host, non-default port, or different database role,
-pass the same connection flags to both phases:
+Restart PostgreSQL after changing `shared_buffers`.
+
+If a local PostgreSQL build is reachable through normal libpq defaults, no
+connection flags are needed.  If the server uses a TCP host, non-default port,
+or different database role, pass the same connection flags to both phases:
 
 ```bash
 python3 bench/bench.py prepare main --host 127.0.0.1 --port 5433 --user postgres --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run main --host 127.0.0.1 --port 5433 --user postgres --variants dp,geqo
 ```
 
-Libpq environment variables such as `PGHOST`, `PGPORT`, `PGUSER`, or
+Libpq environment variables such as `PGHOST`, `PGPORT`, `PGUSER`, and
 `PGSERVICE` work too.  The harness still selects the database names itself.
 
-## 2. Variants
+## Discover
 
-The portable baseline variants `dp` and `geqo` are built in.  The default extra
-variant file is `examples/variants.toml` when that file exists.  Pass
-`--variants-file` only when using a different TOML file for a patch-specific
-algorithm or parameter set.  To change the default extra variants for this
-repository, edit `examples/variants.toml` directly.
-
-Inspect the active variants:
+List the built-in benchmark surface:
 
 ```bash
+python3 bench/bench.py list scenarios
+python3 bench/bench.py list datasets
 python3 bench/bench.py list variants
 ```
 
-Inspect variants from a different extra file:
+`main` is the primary public validation scenario.  `extended` adds smaller
+planning-stress workloads.  `full` also adds the heavier CEB IMDB 3k workload.
+Dataset details are in [WORKLOADS.md](WORKLOADS.md).
+
+## Variants
+
+The portable baseline variants `dp` and `geqo` are built in.  The CLI also
+loads `examples/variants.toml` by default when that file exists.  Edit
+`examples/variants.toml` directly to change the repository's default extra
+variants.  Use `--variants-file` only to replace that default with another TOML
+file.
+
+Inspect variants from a different file:
 
 ```bash
 python3 bench/bench.py list variants --variants-file path/to/variants.toml
 ```
 
-If `--variants` is omitted, the selected scenario uses the built-in `dp` and
-`geqo` baselines.  Variant fields are documented in
-[examples/README.md](examples/README.md).
+Variant fields are documented in [examples/README.md](examples/README.md).
 
-## 3. Data Setup
+## Main Scenario
 
-Dataset details and IMDB CSV setup are documented in [WORKLOADS.md](WORKLOADS.md).
+`main` runs the complete JOB and JOB-Complex workloads.
 
-Typical IMDB CSV setup:
-
-```bash
-mkdir -p data/imdb_csv
-tar -xzf imdb.tgz -C data/imdb_csv
-```
-
-## 4. Discover What Exists
-
-List scenarios:
-
-```bash
-python3 bench/bench.py list scenarios
-```
-
-List datasets:
-
-```bash
-python3 bench/bench.py list datasets
-```
-
-List variants:
-
-```bash
-python3 bench/bench.py list variants
-```
-
-## 5. Main Run
-
-`main` is the primary public validation path for a new join-order algorithm.  It
-runs the complete `job` and `job_complex` workloads.
-
-Prepare:
+Prepare the data:
 
 ```bash
 python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 ```
 
-Run with portable baselines:
+If an already prepared database is present, `prepare` skips it.  Use
+`--force-recreate` only when intentionally dropping and rebuilding the benchmark
+database.
+
+Run the portable baselines:
 
 ```bash
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-Run with an extra variant set:
+Run a patch-specific variant from the default extra variants file:
 
 ```bash
 python3 bench/bench.py run main --variants dp,geqo,goo_cost
 ```
 
-## 6. Extended And Full Runs
+## Broader Scenarios
 
-`extended` is the broad validation layer after `main`.  It adds self-contained
-stress workloads converted from SQLite and GPUQO sources.  These workloads have
-small local data and many wide joins, so they are most useful for planning time
-and join-search stress rather than realistic execution-time claims.
-
-Prepare and run:
+Run `extended` after `main` when broader planning/search-space coverage is
+needed:
 
 ```bash
 python3 bench/bench.py prepare extended --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run extended
 ```
 
-`full` is the complete built-in campaign.  It runs `extended` plus
-`imdb_ceb_3k`, which has much higher query volume and can dominate campaign
-time.
-
-Prepare and run:
+Run `full` only for the complete campaign:
 
 ```bash
 python3 bench/bench.py prepare full --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run full
 ```
 
-In `extended` and `full`, `gpuqo_clique_small` keeps non-`dp` variants on the
-complete 150-query dataset while limiting `dp` to `join_size <= 12`.
+In `extended` and `full`, `gpuqo_clique_small` runs non-`dp` variants on the
+complete workload and limits `dp` to queries with at most 12 joins.
 
-## 7. Output Layout
+## Reviewer Workbook
 
-Every `run` creates local artifacts under `outputs/<run_id>/`:
+Each run writes local artifacts under `outputs/<run_id>/`:
 
 ```text
 outputs/<run_id>/
@@ -156,50 +126,24 @@ outputs/<run_id>/
   summary.csv
 ```
 
-The detailed artifact contract, column meanings, console output, and
-reviewer-table examples are documented in [OUTPUTS.md](OUTPUTS.md).
-
-## 8. Reviewer Tables
-
-Use `tools/render_review_tables.py` to create per-query tables for community
-attachments from an existing `outputs/<run_id>/` directory.  The script writes
-`outputs/<run_id>/review.xlsx`.
-
-This step is optional.  It uses `XlsxWriter`, which is not needed for benchmark
-prepare/run:
+Create the reviewer workbook from an existing run:
 
 ```bash
 python3 -m pip install XlsxWriter
-```
-
-Default table export:
-
-```bash
 python3 tools/render_review_tables.py outputs/<run_id>
 ```
 
-The command renders the datasets and variants recorded in `run.json`.  The
-workbook contains one execution-time sheet and one planning-time sheet, with
-`dataset` as the first table column.
-Execution time is the primary result; planning time is reported separately as a
-diagnostic.
+The script writes `outputs/<run_id>/review.xlsx`.  Workbook layout, `SUM` row
+semantics, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
 
-The exact workbook layout, `SUM` row semantics, and ratio color rules are
-documented in [OUTPUTS.md](OUTPUTS.md).
-
-## 9. CLI Options
-
-These are the supported `run` options after choosing a scenario.  They select
-what to compare, where to resume, and how to label the local run.  Of the
-documented protocol values, only the per-statement timeout guardrail is
-adjustable from this command.
+## Common Run Options
 
 | Option | Use |
 | --- | --- |
-| `--variants-file` | override the default `examples/variants.toml` extra variant file |
 | `--variants` | choose the variants and display/order them explicitly |
+| `--variants-file` | use a different extra variant TOML file |
 | `--resume-run-id` | continue an interrupted run from a safe boundary |
-| `--statement-timeout-ms` | adjust the guardrail timeout for very slow or very fast machines |
+| `--statement-timeout-ms` | adjust the per-statement guardrail timeout |
 | `--tag` | record a local build or patch label in `run.json` |
 
 Resume an interrupted run by passing the output directory name:
@@ -211,25 +155,5 @@ python3 bench/bench.py run main \
 ```
 
 Use the same scenario, variant list, extra variants file if overridden,
-connection flags, tag, and statement timeout as the original run.  The resume id
-is the directory name under `outputs/`.  The harness validates the run context
-and continues from the next unfinished safe group boundary.  Resume does not
-re-run database stabilization, so it does not intentionally replace the
-statistics snapshot used by earlier completed groups.
-
-`--statement-timeout-ms` is not an algorithm knob.  It only limits how long a
-single bad plan can occupy the run.  If it differs from the default
-`600000 ms`, include that value with the published result tables; the run also
-records it in `run.json`.
-
-If an exact `(dataset, query, variant)` hits `statement_timeout` during warmup,
-the harness records later measured repetitions for that same combination as
-skipped timeout rows instead of re-running them.
-
-`--resume-run-id` resumes an existing `outputs/<run_id>/` directory from the
-next unfinished safe group boundary.  The harness checkpoints after complete
-warmup groups and complete measured groups, so resume never continues from the
-middle of a query-group's variant set.
-
-`--tag` labels the local build or patch under test, for example
-`--tag pg18_patch_v4`.
+connection flags, tag, and statement timeout as the original run.  Timeout and
+resume semantics are described in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
