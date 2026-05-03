@@ -15,8 +15,8 @@ protocol, then read [bench_run.py](bench_run.py) for run orchestration and
 
 1. Check prepared databases and required PostgreSQL GUCs before executing
    queries.
-2. Stabilize each prepared database for a new run; resumed runs keep the
-   existing statistics snapshot.
+2. Refresh table statistics for each prepared database in a new run; resumed
+   runs keep the existing statistics snapshot.
 3. Resolve the full dataset/query/variant plan before execution and write the
    initial `run.json`.
 4. Execute discarded warmup groups and measured repetitions, rotating variant
@@ -35,8 +35,8 @@ mechanics:
 3. Parse planning time, execution time, total time, and plan total cost from the
    JSON result.
 4. Classify PostgreSQL `statement_timeout` separately from other errors.
-5. Check database reachability, validate mandatory GUCs, and stabilize prepared
-   databases for fresh runs.
+5. Check database reachability, validate mandatory GUCs, and refresh table
+   statistics for fresh runs.
 
 After those two files, the closest support file is:
 

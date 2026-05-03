@@ -1,15 +1,53 @@
 # Benchmark Runs
 
 This document explains what the benchmark scripts do during a public run.  Use
-[REPRODUCE.md](REPRODUCE.md) for command syntax and [OUTPUTS.md](OUTPUTS.md) for
-artifact formats.
+[REPRODUCE.md](REPRODUCE.md) for the end-to-end reproduction checklist and
+[OUTPUTS.md](OUTPUTS.md) for artifact formats.
 
-## Runner Entry Points
+## CLI Overview
 
-The public CLI is [bench/bench.py](bench/bench.py):
+The benchmark CLI is [bench/bench.py](bench/bench.py).  Use `list` commands to
+inspect the built-in benchmark surface before preparing data or running
+measurements:
+
+```bash
+python3 bench/bench.py list scenarios
+python3 bench/bench.py list datasets
+python3 bench/bench.py list variants
+```
+
+`list scenarios` shows workload groups such as `main`, `extended`, and `full`.
+`list datasets` shows individual query/data sources.  `list variants` shows the
+available algorithm/configuration choices, including any extra variants loaded
+from `--variants-file`.  The `prepare` and `run` subcommands are described in
+the following phases.
+
+## Prepare Phase
 
 ```bash
 python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
+```
+
+`bench.py prepare <scenario>` resolves the datasets in the built-in scenario,
+creates the target PostgreSQL databases, and loads each dataset's schema and
+data.  In the example above, `main` selects the `job` and `job_complex`
+workloads, both backed by the same `imdb_bench` database, so the IMDB data is
+loaded once and reused by both query suites.
+
+IMDB-backed datasets require `--csv-dir` because the CSV bundle is not vendored
+in this repository.  Self-contained datasets, including SQLite select5 and GPUQO
+small workloads, load local SQL files.  Scenario and dataset coverage is
+documented in [WORKLOADS.md](WORKLOADS.md).
+
+If the target database already exists and looks prepared, `prepare` skips it.
+Use `--force-recreate` only when intentionally dropping and rebuilding an
+existing benchmark database.
+
+## Run Phase
+
+Run with portable baselines:
+
+```bash
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
@@ -21,33 +59,23 @@ python3 bench/bench.py run main \
   --variants dp,geqo,my_algo
 ```
 
-## Prepare Phase
-
-`bench.py prepare <scenario>` resolves the datasets in the built-in scenario,
-creates the target PostgreSQL databases, and loads each dataset's schema and
-data.
-
-IMDB-backed datasets require `--csv-dir` because the CSV bundle is not vendored
-in this repository.  Self-contained datasets, including SQLite select5 and GPUQO
-small workloads, load local SQL files.  Scenario and dataset coverage is
-documented in [WORKLOADS.md](WORKLOADS.md).
-
-## Run Phase
-
 `bench.py run <scenario>` performs these steps:
 
-1. Read the selected built-in scenario.
-2. Load built-in `dp` and `geqo` variants, plus any extra variants from the
-   submitted `--variants-file`.
-3. Resolve the explicit `--variants` list, or use the scenario's
-   `default_variants`.
-4. Apply built-in dataset restrictions, such as the `gpuqo_clique_small` `dp`
-   `join_size <= 12` guard.
-5. Check that benchmark databases are reachable and required GUCs exist.
-6. Stabilize each prepared database for a new run.
-7. For each selected query, run discarded warmup pass(es), then measured
+1. Resolve the selected built-in scenario.  For example, `main` selects the
+   complete `job` and `job_complex` query suites.
+2. Load built-in variants plus any variants from `--variants-file`, then choose
+   the explicit `--variants` list or the scenario's default `dp,geqo` list.
+3. Build concrete dataset runs, including any scenario-defined limits.  For
+   example, `extended` and `full` run non-`dp` variants on the complete
+   `gpuqo_clique_small` workload, while limiting `dp` to queries with at most
+   12 joins.
+4. Check that benchmark databases are reachable and required GUCs exist.
+5. For each prepared database in a fresh run, refresh statistics with
+   `VACUUM FREEZE ANALYZE` and issue a best-effort `CHECKPOINT` before any
+   query runs.
+6. For each selected query, run discarded warmup pass(es), then measured
    repetitions.
-8. Flush `run.json`, `raw.csv`, and `summary.csv` after safe progress
+7. Flush `run.json`, `raw.csv`, and `summary.csv` after safe progress
    boundaries.
 
 The runner checkpoints progress after complete warmup groups and complete
@@ -68,10 +96,11 @@ The public benchmark protocol uses these values during `bench.py run`:
 
 - 3 measured repetitions are collected for each selected query and variant.
 - 1 warmup pass is run for each query group before measured repetitions.
-- Each prepared database is stabilized with `VACUUM FREEZE ANALYZE` and a
-  best-effort `CHECKPOINT` before measurement for a new run.
+- Each prepared database has its table statistics refreshed with
+  `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT` before measurement for
+  a new run.
 - `--resume-run-id` preserves the existing database statistics snapshot instead
-  of re-running stabilization for the resumed portion.
+  of refreshing statistics for the resumed portion.
 - Variant order is rotated across query groups and repetitions.
 - If a warmup execution hits `statement_timeout`, later measured repetitions
   for the same `(dataset, query, variant)` are recorded as skipped timeout rows
@@ -80,7 +109,7 @@ The public benchmark protocol uses these values during `bench.py run`:
   current artifacts.
 
 The run command accepts `--statement-timeout-ms` for the guardrail timeout.
-Measured repetitions, warmup count, stabilization behavior, and variant-order
+Measured repetitions, warmup count, statistics-refresh behavior, and variant-order
 policy are not run options.
 
 ## Cluster Memory Baseline
@@ -154,9 +183,10 @@ is not intended to tune algorithm quality.  If the default `600000 ms` is
 changed because of machine speed or campaign time budget, record the override
 with the published results.  The resolved value is written to `run.json`.
 
-## Stabilization
+## Statistics Refresh
 
-Fresh public runs stabilize each prepared database by executing:
+Fresh public runs refresh each prepared database's table statistics by
+executing:
 
 ```sql
 VACUUM FREEZE ANALYZE;
