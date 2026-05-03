@@ -80,9 +80,9 @@ Important fields:
 | `progress` | Resume state and whether the run completed. |
 
 Use `run.json` when a reviewer needs to check which scenario, variants,
-datasets, adjustable timeout, and resume state produced a result table.  The
-fixed run protocol is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md)
-rather than repeated in each run context.
+datasets, adjustable timeout, and resume state produced a result table.  The run
+protocol is documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) rather than
+repeated in each run context.
 Restart-required cluster settings, such as `shared_buffers`, are not changed by
 the harness and should be recorded with the published result set when they
 matter for review.

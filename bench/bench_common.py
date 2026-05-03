@@ -46,10 +46,7 @@ class Scenario:
     name: str
     description: str
     default_variants: tuple[str, ...]
-    reps: int
     statement_timeout_ms: int
-    stabilize: str
-    variant_order_mode: str
     session_gucs: tuple[tuple[str, Any], ...]
     datasets: tuple[DatasetSpec, ...]
 

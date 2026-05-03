@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from bench_common import ConnOpts, Variant, die, psql_cmd, psql_sql, psql_sql_raw, run_cmd, sql_literal
+from bench_common import ConnOpts, Variant, psql_cmd, psql_sql, psql_sql_raw, run_cmd, sql_literal
 
 
 @dataclass(frozen=True)
@@ -57,11 +57,10 @@ def build_session_prelude(
     conn: Optional[ConnOpts],
     scenario_session_gucs: tuple[tuple[str, Any], ...],
     variant: Variant,
-    statement_timeout_ms: Optional[int],
+    statement_timeout_ms: int,
 ) -> list[str]:
     lines = ["RESET ALL;"]
-    if statement_timeout_ms is not None:
-        lines.append(f"SET statement_timeout = {statement_timeout_ms};")
+    lines.append(f"SET statement_timeout = {statement_timeout_ms};")
     lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in scenario_session_gucs)
     lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in variant.session_gucs)
     for k, v in variant.optional_session_gucs:
@@ -125,8 +124,9 @@ def run_one(
     scenario_session_gucs: tuple[tuple[str, Any], ...],
     variant: Variant,
     stmt: str,
+    *,
     conn: Optional[ConnOpts] = None,
-    statement_timeout_ms: Optional[int] = None,
+    statement_timeout_ms: int,
 ) -> RunMetrics:
     script_lines = [*build_session_prelude(db, conn, scenario_session_gucs, variant, statement_timeout_ms)]
     script_lines.extend([explain_sql(stmt), ""])
@@ -150,16 +150,10 @@ def run_one(
 
 def stabilize_db(
     db: str,
-    mode: str,
     conn: Optional[ConnOpts] = None,
 ) -> None:
-    if mode == "vacuum_freeze_analyze":
-        psql_sql(db, "VACUUM FREEZE ANALYZE;", conn=conn, check=True)
-        psql_sql(db, "CHECKPOINT;", conn=conn, check=False)
-        return
-    if mode == "none":
-        return
-    die(f"unknown stabilize mode: {mode}")
+    psql_sql(db, "VACUUM FREEZE ANALYZE;", conn=conn, check=True)
+    psql_sql(db, "CHECKPOINT;", conn=conn, check=False)
 
 
 def rotate_variants(variants: list[Variant], offset: int) -> list[Variant]:

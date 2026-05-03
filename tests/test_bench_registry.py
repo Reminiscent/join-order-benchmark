@@ -19,10 +19,7 @@ class BenchRegistryTests(unittest.TestCase):
             name="full",
             description="test scenario",
             default_variants=("dp", "geqo"),
-            reps=1,
             statement_timeout_ms=1000,
-            stabilize="none",
-            variant_order_mode="fixed",
             session_gucs=(),
             datasets=(
                 DatasetSpec(dataset="gpuqo_clique_small", exclude_variants=("dp",)),

@@ -21,7 +21,7 @@ documents how those tables were produced.
 | What was tested first? | `main` is the primary validation scenario.  It runs the complete JOB and JOB-Complex workloads. |
 | Which broader workloads are included? | `extended` adds small-data planning/search-space stress workloads; `full` adds the heavier CEB IMDB 3k subset.  See [WORKLOADS.md](WORKLOADS.md). |
 | Which algorithm variants were compared? | Built-in baselines are `dp` and `geqo`.  Other variants are patch-specific algorithms or parameter sets supplied through an optional `--variants-file` and explicit `--variants` list. |
-| How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) describes the fixed public run protocol: prepare data, stabilize tables, warm up, measure, handle timeouts, and write artifacts. |
+| How was the benchmark run? | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) describes the public run protocol: prepare data, stabilize tables, warm up, measure, handle timeouts, and write artifacts. |
 | How can I reproduce it? | [REPRODUCE.md](REPRODUCE.md) is the command-oriented reproduction guide. |
 
 ## Cluster Setup
@@ -95,7 +95,7 @@ Top-level folders are split by responsibility:
 
 ## More Detail
 
-- [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md): fixed run protocol and timing semantics
+- [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md): run protocol and timing semantics
 - [REPRODUCE.md](REPRODUCE.md): command-oriented reproduction workflow
 - [WORKLOADS.md](WORKLOADS.md): scenario layers, workload coverage, IMDB CSV setup, and query counts
 - [OUTPUTS.md](OUTPUTS.md): run artifacts and reviewer tables

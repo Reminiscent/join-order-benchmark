@@ -19,9 +19,6 @@ from bench_prepare import prepare_scenario
 from bench_run import run_scenario
 
 
-DEFAULT_WARMUP_RUNS = 1
-
-
 def build_parser() -> argparse.ArgumentParser:
     scenarios = load_scenarios()
 
@@ -62,7 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap_run.add_argument(
         "--resume-run-id",
         default=None,
-        help="resume an existing outputs/<run_id> directory from the next unfinished group boundary",
+        help=(
+            "resume an existing outputs/<run_id> directory from the next unfinished "
+            "group boundary without re-running database stabilization"
+        ),
     )
     ap_run.add_argument(
         "--statement-timeout-ms",
@@ -128,15 +128,11 @@ def main() -> None:
             variant_names,
             resolved_runs,
             conn=conn,
-            reps=scenario.reps,
             statement_timeout_ms=(
                 args.statement_timeout_ms
                 if args.statement_timeout_ms is not None
                 else scenario.statement_timeout_ms
             ),
-            stabilize=scenario.stabilize,
-            variant_order_mode=scenario.variant_order_mode,
-            warmup_runs=DEFAULT_WARMUP_RUNS,
             resume_run_id=args.resume_run_id,
             tag=args.tag,
             fail_on_error=args.fail_on_error,

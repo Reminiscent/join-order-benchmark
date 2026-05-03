@@ -20,10 +20,7 @@ from bench_common import (
 
 
 DEFAULT_SCENARIO_VARIANTS = ("dp", "geqo")
-DEFAULT_SCENARIO_REPS = 3
 DEFAULT_STATEMENT_TIMEOUT_MS = 600000
-DEFAULT_STABILIZE = "vacuum_freeze_analyze"
-DEFAULT_VARIANT_ORDER_MODE = "rotate"
 DEFAULT_SESSION_GUCS = (
     ("join_collapse_limit", 100),
     ("max_parallel_workers_per_gather", 0),
@@ -70,10 +67,7 @@ def built_in_scenario(
         name=name,
         description=description,
         default_variants=DEFAULT_SCENARIO_VARIANTS,
-        reps=DEFAULT_SCENARIO_REPS,
         statement_timeout_ms=DEFAULT_STATEMENT_TIMEOUT_MS,
-        stabilize=DEFAULT_STABILIZE,
-        variant_order_mode=DEFAULT_VARIANT_ORDER_MODE,
         session_gucs=DEFAULT_SESSION_GUCS,
         datasets=datasets,
     )

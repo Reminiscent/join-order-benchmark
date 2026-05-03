@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from bench_common import safe_artifact_name
+from bench_common import parse_csv_list, safe_artifact_name
 
 
 METRICS = {
@@ -80,12 +80,6 @@ class ReviewTable:
     rows: tuple[ReviewTableRow, ...]
     total_values: dict[str, ReviewTableCell]
     total_ratios: dict[str, ReviewTableCell]
-
-
-def parse_csv_list(raw: Optional[str]) -> list[str]:
-    if raw is None:
-        return []
-    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 def maybe_float(raw: str) -> float | None:

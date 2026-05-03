@@ -1,3 +1,9 @@
+"""Execution driver for ``bench.py run``.
+
+``run_scenario()`` is kept first so readers see the benchmark workflow before
+the lower-level checkpointing, resume, and reporting helpers.
+"""
+
 from __future__ import annotations
 
 import csv
@@ -30,6 +36,386 @@ from bench_exec import (
 from bench_results import build_run_context, write_raw_csv, write_run_context, write_summary_csv
 
 
+MEASURED_REPS = 3
+WARMUP_RUNS = 1
+
+
+def run_scenario(
+    scenario: Scenario,
+    variants_registry: dict[str, Variant],
+    variant_names: tuple[str, ...],
+    resolved_runs: list[ResolvedDatasetRun],
+    *,
+    conn: Optional[ConnOpts],
+    statement_timeout_ms: int,
+    resume_run_id: Optional[str],
+    tag: str,
+    fail_on_error: bool,
+) -> None:
+    if statement_timeout_ms < 0:
+        die(f"statement timeout must be >= 0 (got {statement_timeout_ms})")
+
+    run_id = (
+        resume_run_id
+        if resume_run_id
+        else f"{utc_now().strftime('%Y%m%d_%H%M%S_%f')}_{safe_artifact_name(scenario.name)}"
+    )
+    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = OUTPUTS_DIR / run_id
+    if resume_run_id:
+        if not out_dir.is_dir():
+            die(f"resume run_id not found: {out_dir}")
+    else:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    dbs = sorted({entry.db for entry in resolved_runs})
+    ensure_databases_reachable(dbs, conn)
+    validate_required_gucs(dbs[0], conn, scenario, variants_registry, variant_names)
+    effective_variant_contexts = [
+        {
+            "name": variants_registry[name].name,
+            "label": variants_registry[name].label,
+            "session_gucs": [{k: v} for k, v in resolved_variant_session_gucs(dbs[0], conn, variants_registry[name])],
+        }
+        for name in variant_names
+    ]
+
+    print(f"[run] scenario={scenario.name}")
+    print(f"[run] variants={','.join(variant_names)}")
+    print(f"[run] warmup_passes={WARMUP_RUNS} measured_reps={MEASURED_REPS}")
+    print(f"[run] outputs={out_dir}")
+
+    raw_rows: list[dict[str, str]] = []
+    summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+    query_counts: list[dict[str, Any]] = []
+    stabilized_dbs: set[str] = set()
+    prepared_runs: list[dict[str, Any]] = []
+    warmup_failures: list[dict[str, Any]] = []
+    warmup_timeout_keys: set[tuple[str, str, str]] = set()
+    completed_warmup_groups: set[tuple[int, str, str]] = set()
+    completed_measured_groups: set[tuple[str, str, int]] = set()
+    termination: dict[str, Any] | None = None
+
+    for spec in resolved_runs:
+        # A fresh run owns one statistics snapshot per prepared database.  Resume
+        # keeps the existing snapshot so one artifact does not mix pre/post-ANALYZE
+        # groups.
+        if resume_run_id is None and spec.db not in stabilized_dbs:
+            stabilize_db(spec.db, conn)
+            stabilized_dbs.add(spec.db)
+
+        # Resolve query SQL before executing anything so the run context records
+        # the complete dataset/query/variant plan even for interrupted runs.
+        queries = select_queries(spec)
+        query_plans = [(q, build_statement(spec.dataset, load_sql_for_query(q))) for q in queries]
+        query_counts.append(
+            {
+                "dataset": spec.dataset,
+                "db": spec.db,
+                "max_join": spec.max_join,
+                "queries_selected": len(query_plans),
+                "variants": list(spec.variants),
+            }
+        )
+        print(
+            f"[run] dataset={spec.dataset} db={spec.db} queries={len(query_plans)} "
+            f"variants={','.join(spec.variants)} max_join={spec.max_join}"
+        )
+
+        entry_variants = [variants_registry[name] for name in spec.variants]
+        prepared_runs.append(
+            {
+                "spec": spec,
+                "entry_variants": entry_variants,
+                "query_plans": query_plans,
+            }
+        )
+
+    if resume_run_id:
+        run_context_path = out_dir / "run.json"
+        if not run_context_path.is_file():
+            die(f"resume run_id is missing run.json: {run_context_path}")
+        run_context = json.loads(run_context_path.read_text())
+        validate_resume_context(
+            run_context,
+            scenario=scenario,
+            tag=tag,
+            statement_timeout_ms=statement_timeout_ms,
+            variant_names=variant_names,
+            resolved_runs=resolved_runs,
+        )
+        if run_context.get("progress", {}).get("completed") is True:
+            print(f"[run] resume target already completed: {run_id}")
+            return
+        # Rebuild in-memory state from durable artifacts.  Progress is tracked at
+        # whole warmup-group and whole measured-group granularity only.
+        raw_rows = load_raw_rows(out_dir / "raw.csv")
+        summary_acc = build_summary_acc_from_raw_rows(raw_rows)
+        warmup_failures = list(run_context.get("warmup_failures", []))
+        warmup_timeout_keys = {
+            (str(row["dataset"]), str(row["query_id"]), str(row["variant"]))
+            for row in warmup_failures
+            if row.get("category") == "statement_timeout"
+        }
+        progress = run_context.get("progress", {})
+        completed_warmup_groups = deserialize_warmup_groups(progress.get("completed_warmup_groups", []))
+        completed_measured_groups = deserialize_measured_groups(progress.get("completed_measured_groups", []))
+        print(
+            f"[run] resume_run_id={run_id} completed_warmup_groups={len(completed_warmup_groups)} "
+            f"completed_measured_groups={len(completed_measured_groups)}"
+        )
+
+    # Persist the full run shape before executing groups.  Even interrupted runs
+    # then have enough context for resume validation and post-run inspection.
+    flush_outputs(
+        out_dir=out_dir,
+        run_id=run_id,
+        scenario=scenario,
+        resolved_runs=resolved_runs,
+        raw_rows=raw_rows,
+        summary_acc=summary_acc,
+        tag=tag,
+        statement_timeout_ms=statement_timeout_ms,
+        effective_variant_contexts=effective_variant_contexts,
+        query_counts=query_counts,
+        warmup_failures=warmup_failures,
+        termination=termination,
+        completed_warmup_groups=completed_warmup_groups,
+        completed_measured_groups=completed_measured_groups,
+        completed=False,
+    )
+
+    # Execute at query-group boundaries: all variants for one warmup pass or
+    # measured repetition complete before the progress marker advances.
+    for prepared in prepared_runs:
+        if termination is not None:
+            break
+        spec = prepared["spec"]
+        entry_variants = prepared["entry_variants"]
+        query_plans = prepared["query_plans"]
+
+        for query_idx, (q, stmt) in enumerate(query_plans):
+            if termination is not None:
+                break
+
+            for warmup_pass in range(1, WARMUP_RUNS + 1):
+                warmup_group = (warmup_pass, spec.dataset, q.query_id)
+                if warmup_group in completed_warmup_groups:
+                    continue
+                ordered_variants = rotate_variants(entry_variants, query_idx + warmup_pass - 1)
+                for variant in ordered_variants:
+                    try:
+                        run_one(
+                            spec.db,
+                            scenario.session_gucs,
+                            variant,
+                            stmt,
+                            conn=conn,
+                            statement_timeout_ms=statement_timeout_ms,
+                        )
+                    except StatementTimeoutError as e:
+                        warmup_timeout_keys.add((spec.dataset, q.query_id, variant.name))
+                        record_warmup_failure(
+                            warmup_failures=warmup_failures,
+                            warmup_pass=warmup_pass,
+                            spec=spec,
+                            variant=variant,
+                            query=q,
+                            error=str(e),
+                            category="statement_timeout",
+                        )
+                    except Exception as e:
+                        record_warmup_failure(
+                            warmup_failures=warmup_failures,
+                            warmup_pass=warmup_pass,
+                            spec=spec,
+                            variant=variant,
+                            query=q,
+                            error=str(e),
+                            category="error",
+                        )
+                        if fail_on_error:
+                            termination = {
+                                "phase": "warmup",
+                                "category": "error",
+                                "dataset": spec.dataset,
+                                "db": spec.db,
+                                "variant": variant.name,
+                                "query_id": q.query_id,
+                                "error": str(e),
+                            }
+                            print("[run] fail_on_error triggered during warmup; measured runs will be skipped")
+                            break
+                if termination is not None:
+                    break
+                # Warmup rows are intentionally not measured artifacts; only the
+                # completed group marker and any timeout/error state are persisted.
+                completed_warmup_groups.add(warmup_group)
+                flush_outputs(
+                    out_dir=out_dir,
+                    run_id=run_id,
+                    scenario=scenario,
+                    resolved_runs=resolved_runs,
+                    raw_rows=raw_rows,
+                    summary_acc=summary_acc,
+                    tag=tag,
+                    statement_timeout_ms=statement_timeout_ms,
+                    effective_variant_contexts=effective_variant_contexts,
+                    query_counts=query_counts,
+                    warmup_failures=warmup_failures,
+                    termination=termination,
+                    completed_warmup_groups=completed_warmup_groups,
+                    completed_measured_groups=completed_measured_groups,
+                    completed=False,
+                )
+
+            if termination is not None:
+                break
+
+            for rep in range(1, MEASURED_REPS + 1):
+                measured_group = (spec.dataset, q.query_id, rep)
+                if measured_group in completed_measured_groups:
+                    continue
+                ordered_variants = rotate_variants(entry_variants, query_idx + rep - 1)
+
+                for variant in ordered_variants:
+                    key = (spec.dataset, q.query_id, variant.name)
+                    status = "ok"
+                    err = ""
+                    planning_ms = -1.0
+                    total_ms = -1.0
+                    exec_ms = -1.0
+                    plan_total_cost = -1.0
+
+                    if key in warmup_timeout_keys:
+                        # Avoid repeatedly spending the timeout budget on a plan
+                        # that already timed out during the discarded warmup pass.
+                        status = "timeout"
+                        err = warmup_timeout_skip_error(
+                            "ERROR: canceling statement due to statement timeout"
+                        )
+                    else:
+                        try:
+                            metrics = run_one(
+                                spec.db,
+                                scenario.session_gucs,
+                                variant,
+                                stmt,
+                                conn=conn,
+                                statement_timeout_ms=statement_timeout_ms,
+                            )
+                            planning_ms = metrics.planning_ms
+                            total_ms = metrics.total_ms
+                            plan_total_cost = metrics.plan_total_cost
+                            exec_ms = metrics.execution_ms
+                        except StatementTimeoutError as e:
+                            status = "timeout"
+                            err = str(e)
+                        except Exception as e:
+                            status = "error"
+                            err = str(e)
+
+                    raw_rows.append(
+                        {
+                            "dataset": spec.dataset,
+                            "query_id": q.query_id,
+                            "variant": variant.name,
+                            "rep": str(rep),
+                            "planning_ms": f"{planning_ms:.3f}" if planning_ms >= 0 else "",
+                            "execution_ms": f"{exec_ms:.3f}" if exec_ms >= 0 else "",
+                            "total_ms": f"{total_ms:.3f}" if total_ms >= 0 else "",
+                            "plan_total_cost": f"{plan_total_cost:.3f}" if plan_total_cost >= 0 else "",
+                            "status": status,
+                            "error": err,
+                        }
+                    )
+
+                    summary_acc.setdefault(key, []).append(
+                        {
+                            "rep": rep,
+                            "planning_ms": planning_ms,
+                            "total_ms": total_ms,
+                            "execution_ms": exec_ms,
+                            "plan_total_cost": plan_total_cost,
+                            "status": status,
+                        }
+                    )
+                completed_measured_groups.add(measured_group)
+                flush_outputs(
+                    out_dir=out_dir,
+                    run_id=run_id,
+                    scenario=scenario,
+                    resolved_runs=resolved_runs,
+                    raw_rows=raw_rows,
+                    summary_acc=summary_acc,
+                    tag=tag,
+                    statement_timeout_ms=statement_timeout_ms,
+                    effective_variant_contexts=effective_variant_contexts,
+                    query_counts=query_counts,
+                    warmup_failures=warmup_failures,
+                    termination=termination,
+                    completed_warmup_groups=completed_warmup_groups,
+                    completed_measured_groups=completed_measured_groups,
+                    completed=False,
+                )
+    flush_outputs(
+        out_dir=out_dir,
+        run_id=run_id,
+        scenario=scenario,
+        resolved_runs=resolved_runs,
+        raw_rows=raw_rows,
+        summary_acc=summary_acc,
+        tag=tag,
+        statement_timeout_ms=statement_timeout_ms,
+        effective_variant_contexts=effective_variant_contexts,
+        query_counts=query_counts,
+        warmup_failures=warmup_failures,
+        termination=termination,
+        completed_warmup_groups=completed_warmup_groups,
+        completed_measured_groups=completed_measured_groups,
+        completed=termination is None,
+    )
+
+    warmup_timeout_rows = [row for row in warmup_failures if row["category"] == "statement_timeout"]
+    warmup_error_rows = [row for row in warmup_failures if row["category"] == "error"]
+    skipped_timeout_rows = [
+        row
+        for row in raw_rows
+        if row["status"] == "timeout"
+        and row["error"].startswith("skipped measured run after warmup timeout:")
+    ]
+    timeout_rows = [
+        row
+        for row in raw_rows
+        if row["status"] == "timeout"
+        and not row["error"].startswith("skipped measured run after warmup timeout:")
+    ]
+    err_rows = [row for row in raw_rows if row["status"] == "error"]
+
+    print_failure_rows(label="warmup_timeouts", rows=warmup_timeout_rows)
+    print_failure_rows(label="warmup_errors", rows=warmup_error_rows)
+    print_failure_rows(label="skipped_timeouts", rows=skipped_timeout_rows)
+    print_failure_rows(label="timeouts", rows=timeout_rows)
+
+    if termination is not None:
+        print(
+            f"[run] terminated phase={termination['phase']} dataset={termination['dataset']} "
+            f"variant={termination['variant']} query={termination['query_id']}: {termination['error']}"
+        )
+        raise SystemExit(1)
+
+    if err_rows:
+        print_failure_rows(label="errors", rows=err_rows)
+        if fail_on_error:
+            raise SystemExit(1)
+    elif warmup_failures or skipped_timeout_rows or timeout_rows:
+        print("[run] completed with non-fatal failures")
+    else:
+        print("[run] completed without errors")
+
+
+# Helper functions live below the workflow so the file reads from orchestration
+# down into checkpointing and resume details.
 def record_warmup_failure(
     *,
     warmup_failures: list[dict[str, Any]],
@@ -204,8 +590,6 @@ def validate_resume_context(
         die(f"resume run_id has tag '{run_context.get('tag', '')}', expected '{tag}'")
 
     existing_timeout = run_context.get("statement_timeout_ms")
-    if existing_timeout is None:
-        existing_timeout = run_context.get("protocol", {}).get("statement_timeout_ms")
     if existing_timeout != statement_timeout_ms:
         die(
             "resume run_id statement_timeout_ms mismatch: "
@@ -272,381 +656,3 @@ def flush_outputs(
     }
 
     write_run_context(out_dir / "run.json", run_context)
-
-
-def run_scenario(
-    scenario: Scenario,
-    variants_registry: dict[str, Variant],
-    variant_names: tuple[str, ...],
-    resolved_runs: list[ResolvedDatasetRun],
-    *,
-    conn: Optional[ConnOpts],
-    reps: int,
-    statement_timeout_ms: int,
-    stabilize: str,
-    variant_order_mode: str,
-    warmup_runs: int,
-    resume_run_id: Optional[str],
-    tag: str,
-    fail_on_error: bool,
-) -> None:
-    if reps <= 0:
-        die(f"scenario repetitions must be >= 1 (got {reps})")
-    if statement_timeout_ms < 0:
-        die(f"statement timeout must be >= 0 (got {statement_timeout_ms})")
-    if warmup_runs < 0:
-        die(f"warmup runs must be >= 0 (got {warmup_runs})")
-    if variant_order_mode not in {"fixed", "rotate"}:
-        die(f"scenario defines unsupported variant order mode: {variant_order_mode}")
-
-    run_id = (
-        resume_run_id
-        if resume_run_id
-        else f"{utc_now().strftime('%Y%m%d_%H%M%S_%f')}_{safe_artifact_name(scenario.name)}"
-    )
-    OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_dir = OUTPUTS_DIR / run_id
-    if resume_run_id:
-        if not out_dir.is_dir():
-            die(f"resume run_id not found: {out_dir}")
-    else:
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-    dbs = sorted({entry.db for entry in resolved_runs})
-    ensure_databases_reachable(dbs, conn)
-    validate_required_gucs(dbs[0], conn, scenario, variants_registry, variant_names)
-    effective_variant_contexts = [
-        {
-            "name": variants_registry[name].name,
-            "label": variants_registry[name].label,
-            "session_gucs": [{k: v} for k, v in resolved_variant_session_gucs(dbs[0], conn, variants_registry[name])],
-        }
-        for name in variant_names
-    ]
-
-    print(f"[run] scenario={scenario.name}")
-    print(f"[run] variants={','.join(variant_names)}")
-    print(f"[run] warmup_passes={warmup_runs} measured_reps={reps}")
-    print(f"[run] outputs={out_dir}")
-
-    raw_rows: list[dict[str, str]] = []
-    summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = {}
-    query_counts: list[dict[str, Any]] = []
-    stabilized_dbs: set[str] = set()
-    prepared_runs: list[dict[str, Any]] = []
-    warmup_failures: list[dict[str, Any]] = []
-    warmup_timeout_keys: set[tuple[str, str, str]] = set()
-    completed_warmup_groups: set[tuple[int, str, str]] = set()
-    completed_measured_groups: set[tuple[str, str, int]] = set()
-    termination: dict[str, Any] | None = None
-
-    for spec in resolved_runs:
-        if resume_run_id is None and spec.db not in stabilized_dbs:
-            stabilize_db(spec.db, stabilize, conn)
-            stabilized_dbs.add(spec.db)
-
-        queries = select_queries(spec)
-        query_plans = [(q, build_statement(spec.dataset, load_sql_for_query(q))) for q in queries]
-        query_counts.append(
-            {
-                "dataset": spec.dataset,
-                "db": spec.db,
-                "max_join": spec.max_join,
-                "queries_selected": len(query_plans),
-                "variants": list(spec.variants),
-            }
-        )
-        print(
-            f"[run] dataset={spec.dataset} db={spec.db} queries={len(query_plans)} "
-            f"variants={','.join(spec.variants)} max_join={spec.max_join}"
-        )
-
-        entry_variants = [variants_registry[name] for name in spec.variants]
-        prepared_runs.append(
-            {
-                "spec": spec,
-                "entry_variants": entry_variants,
-                "query_plans": query_plans,
-            }
-        )
-
-    if resume_run_id:
-        assert out_dir is not None
-        run_context_path = out_dir / "run.json"
-        if not run_context_path.is_file():
-            die(f"resume run_id is missing run.json: {run_context_path}")
-        run_context = json.loads(run_context_path.read_text())
-        validate_resume_context(
-            run_context,
-            scenario=scenario,
-            tag=tag,
-            statement_timeout_ms=statement_timeout_ms,
-            variant_names=variant_names,
-            resolved_runs=resolved_runs,
-        )
-        if run_context.get("progress", {}).get("completed") is True:
-            print(f"[run] resume target already completed: {run_id}")
-            return
-        raw_rows = load_raw_rows(out_dir / "raw.csv")
-        summary_acc = build_summary_acc_from_raw_rows(raw_rows)
-        warmup_failures = list(run_context.get("warmup_failures", []))
-        warmup_timeout_keys = {
-            (str(row["dataset"]), str(row["query_id"]), str(row["variant"]))
-            for row in warmup_failures
-            if row.get("category") == "statement_timeout"
-        }
-        progress = run_context.get("progress", {})
-        completed_warmup_groups = deserialize_warmup_groups(progress.get("completed_warmup_groups", []))
-        completed_measured_groups = deserialize_measured_groups(progress.get("completed_measured_groups", []))
-        print(
-            f"[run] resume_run_id={run_id} completed_warmup_groups={len(completed_warmup_groups)} "
-            f"completed_measured_groups={len(completed_measured_groups)}"
-        )
-
-    flush_outputs(
-        out_dir=out_dir,
-        run_id=run_id,
-        scenario=scenario,
-        resolved_runs=resolved_runs,
-        raw_rows=raw_rows,
-        summary_acc=summary_acc,
-        tag=tag,
-        statement_timeout_ms=statement_timeout_ms,
-        effective_variant_contexts=effective_variant_contexts,
-        query_counts=query_counts,
-        warmup_failures=warmup_failures,
-        termination=termination,
-        completed_warmup_groups=completed_warmup_groups,
-        completed_measured_groups=completed_measured_groups,
-        completed=False,
-    )
-
-    for prepared in prepared_runs:
-        if termination is not None:
-            break
-        spec = prepared["spec"]
-        entry_variants = prepared["entry_variants"]
-        query_plans = prepared["query_plans"]
-
-        for query_idx, (q, stmt) in enumerate(query_plans):
-            if termination is not None:
-                break
-
-            for warmup_pass in range(1, warmup_runs + 1):
-                warmup_group = (warmup_pass, spec.dataset, q.query_id)
-                if warmup_group in completed_warmup_groups:
-                    continue
-                ordered_variants = (
-                    rotate_variants(entry_variants, query_idx + warmup_pass - 1)
-                    if variant_order_mode == "rotate"
-                    else list(entry_variants)
-                )
-                for variant in ordered_variants:
-                    try:
-                        run_one(
-                            spec.db,
-                            scenario.session_gucs,
-                            variant,
-                            stmt,
-                            conn=conn,
-                            statement_timeout_ms=statement_timeout_ms,
-                        )
-                    except StatementTimeoutError as e:
-                        warmup_timeout_keys.add((spec.dataset, q.query_id, variant.name))
-                        record_warmup_failure(
-                            warmup_failures=warmup_failures,
-                            warmup_pass=warmup_pass,
-                            spec=spec,
-                            variant=variant,
-                            query=q,
-                            error=str(e),
-                            category="statement_timeout",
-                        )
-                    except Exception as e:
-                        record_warmup_failure(
-                            warmup_failures=warmup_failures,
-                            warmup_pass=warmup_pass,
-                            spec=spec,
-                            variant=variant,
-                            query=q,
-                            error=str(e),
-                            category="error",
-                        )
-                        if fail_on_error:
-                            termination = {
-                                "phase": "warmup",
-                                "category": "error",
-                                "dataset": spec.dataset,
-                                "db": spec.db,
-                                "variant": variant.name,
-                                "query_id": q.query_id,
-                                "error": str(e),
-                            }
-                            print("[run] fail_on_error triggered during warmup; measured runs will be skipped")
-                            break
-                if termination is not None:
-                    break
-                completed_warmup_groups.add(warmup_group)
-                flush_outputs(
-                    out_dir=out_dir,
-                    run_id=run_id,
-                    scenario=scenario,
-                    resolved_runs=resolved_runs,
-                    raw_rows=raw_rows,
-                    summary_acc=summary_acc,
-                    tag=tag,
-                    statement_timeout_ms=statement_timeout_ms,
-                    effective_variant_contexts=effective_variant_contexts,
-                    query_counts=query_counts,
-                    warmup_failures=warmup_failures,
-                    termination=termination,
-                    completed_warmup_groups=completed_warmup_groups,
-                    completed_measured_groups=completed_measured_groups,
-                    completed=False,
-                )
-
-            if termination is not None:
-                break
-
-            for rep in range(1, reps + 1):
-                measured_group = (spec.dataset, q.query_id, rep)
-                if measured_group in completed_measured_groups:
-                    continue
-                ordered_variants = (
-                    rotate_variants(entry_variants, query_idx + rep - 1)
-                    if variant_order_mode == "rotate"
-                    else list(entry_variants)
-                )
-
-                for variant in ordered_variants:
-                    key = (spec.dataset, q.query_id, variant.name)
-                    status = "ok"
-                    err = ""
-                    planning_ms = -1.0
-                    total_ms = -1.0
-                    exec_ms = -1.0
-                    plan_total_cost = -1.0
-
-                    if key in warmup_timeout_keys:
-                        status = "timeout"
-                        err = warmup_timeout_skip_error(
-                            "ERROR: canceling statement due to statement timeout"
-                        )
-                    else:
-                        try:
-                            metrics = run_one(
-                                spec.db,
-                                scenario.session_gucs,
-                                variant,
-                                stmt,
-                                conn=conn,
-                                statement_timeout_ms=statement_timeout_ms,
-                            )
-                            planning_ms = metrics.planning_ms
-                            total_ms = metrics.total_ms
-                            plan_total_cost = metrics.plan_total_cost
-                            exec_ms = metrics.execution_ms
-                        except StatementTimeoutError as e:
-                            status = "timeout"
-                            err = str(e)
-                        except Exception as e:
-                            status = "error"
-                            err = str(e)
-
-                    raw_rows.append(
-                        {
-                            "dataset": spec.dataset,
-                            "query_id": q.query_id,
-                            "variant": variant.name,
-                            "rep": str(rep),
-                            "planning_ms": f"{planning_ms:.3f}" if planning_ms >= 0 else "",
-                            "execution_ms": f"{exec_ms:.3f}" if exec_ms >= 0 else "",
-                            "total_ms": f"{total_ms:.3f}" if total_ms >= 0 else "",
-                            "plan_total_cost": f"{plan_total_cost:.3f}" if plan_total_cost >= 0 else "",
-                            "status": status,
-                            "error": err,
-                        }
-                    )
-
-                    summary_acc.setdefault(key, []).append(
-                        {
-                            "rep": rep,
-                            "planning_ms": planning_ms,
-                            "total_ms": total_ms,
-                            "execution_ms": exec_ms,
-                            "plan_total_cost": plan_total_cost,
-                            "status": status,
-                        }
-                    )
-                completed_measured_groups.add(measured_group)
-                flush_outputs(
-                    out_dir=out_dir,
-                    run_id=run_id,
-                    scenario=scenario,
-                    resolved_runs=resolved_runs,
-                    raw_rows=raw_rows,
-                    summary_acc=summary_acc,
-                    tag=tag,
-                    statement_timeout_ms=statement_timeout_ms,
-                    effective_variant_contexts=effective_variant_contexts,
-                    query_counts=query_counts,
-                    warmup_failures=warmup_failures,
-                    termination=termination,
-                    completed_warmup_groups=completed_warmup_groups,
-                    completed_measured_groups=completed_measured_groups,
-                    completed=False,
-                )
-    flush_outputs(
-        out_dir=out_dir,
-        run_id=run_id,
-        scenario=scenario,
-        resolved_runs=resolved_runs,
-        raw_rows=raw_rows,
-        summary_acc=summary_acc,
-        tag=tag,
-        statement_timeout_ms=statement_timeout_ms,
-        effective_variant_contexts=effective_variant_contexts,
-        query_counts=query_counts,
-        warmup_failures=warmup_failures,
-        termination=termination,
-        completed_warmup_groups=completed_warmup_groups,
-        completed_measured_groups=completed_measured_groups,
-        completed=termination is None,
-    )
-
-    warmup_timeout_rows = [row for row in warmup_failures if row["category"] == "statement_timeout"]
-    warmup_error_rows = [row for row in warmup_failures if row["category"] == "error"]
-    skipped_timeout_rows = [
-        row
-        for row in raw_rows
-        if row["status"] == "timeout"
-        and row["error"].startswith("skipped measured run after warmup timeout:")
-    ]
-    timeout_rows = [
-        row
-        for row in raw_rows
-        if row["status"] == "timeout"
-        and not row["error"].startswith("skipped measured run after warmup timeout:")
-    ]
-    err_rows = [row for row in raw_rows if row["status"] == "error"]
-
-    print_failure_rows(label="warmup_timeouts", rows=warmup_timeout_rows)
-    print_failure_rows(label="warmup_errors", rows=warmup_error_rows)
-    print_failure_rows(label="skipped_timeouts", rows=skipped_timeout_rows)
-    print_failure_rows(label="timeouts", rows=timeout_rows)
-
-    if termination is not None:
-        print(
-            f"[run] terminated phase={termination['phase']} dataset={termination['dataset']} "
-            f"variant={termination['variant']} query={termination['query_id']}: {termination['error']}"
-        )
-        raise SystemExit(1)
-
-    if err_rows:
-        print_failure_rows(label="errors", rows=err_rows)
-        if fail_on_error:
-            raise SystemExit(1)
-    elif warmup_failures or skipped_timeout_rows or timeout_rows:
-        print("[run] completed with non-fatal failures")
-    else:
-        print("[run] completed without errors")

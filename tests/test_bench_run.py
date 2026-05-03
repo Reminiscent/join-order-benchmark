@@ -37,10 +37,7 @@ class RunScenarioTests(unittest.TestCase):
             name="main",
             description="test scenario",
             default_variants=("dp",),
-            reps=1,
             statement_timeout_ms=1000,
-            stabilize="none",
-            variant_order_mode="fixed",
             session_gucs=(),
             datasets=(),
         )
@@ -83,9 +80,13 @@ class RunScenarioTests(unittest.TestCase):
         run_one_side_effect: object,
         *,
         queries: list[QueryMeta] | None = None,
+        measured_reps: int = 1,
+        warmup_runs: int = 0,
     ) -> tuple[Mock, Mock]:
         stack.enter_context(patch.object(bench_run, "OUTPUTS_DIR", outputs_dir))
         stack.enter_context(patch.object(bench_run, "utc_now", Mock(return_value=FIXED_NOW)))
+        stack.enter_context(patch.object(bench_run, "MEASURED_REPS", measured_reps))
+        stack.enter_context(patch.object(bench_run, "WARMUP_RUNS", warmup_runs))
         stack.enter_context(patch.object(bench_run, "ensure_databases_reachable", Mock()))
         stack.enter_context(patch.object(bench_run, "validate_required_gucs", Mock()))
         stack.enter_context(patch.object(bench_run, "resolved_variant_session_gucs", Mock(return_value=())))
@@ -119,6 +120,7 @@ class RunScenarioTests(unittest.TestCase):
                 stack,
                 outputs_dir,
                 bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
+                warmup_runs=1,
             )
 
             bench_run.run_scenario(
@@ -127,11 +129,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                reps=1,
                 statement_timeout_ms=1000,
-                stabilize="none",
-                variant_order_mode="fixed",
-                warmup_runs=1,
                 resume_run_id=None,
                 tag="",
                 fail_on_error=True,
@@ -162,11 +160,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                reps=1,
                 statement_timeout_ms=1000,
-                stabilize="none",
-                variant_order_mode="fixed",
-                warmup_runs=0,
                 resume_run_id=None,
                 tag="",
                 fail_on_error=True,
@@ -185,6 +179,7 @@ class RunScenarioTests(unittest.TestCase):
                 stack,
                 outputs_dir,
                 RuntimeError("ERROR: planner blew up"),
+                warmup_runs=1,
             )
 
             with self.assertRaises(SystemExit) as ctx:
@@ -194,11 +189,7 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp",),
                     self.make_resolved_runs(),
                     conn=None,
-                    reps=1,
                     statement_timeout_ms=1000,
-                    stabilize="none",
-                    variant_order_mode="fixed",
-                    warmup_runs=1,
                     resume_run_id=None,
                     tag="",
                     fail_on_error=True,
@@ -229,11 +220,7 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp",),
                     self.make_resolved_runs(),
                     conn=None,
-                    reps=1,
                     statement_timeout_ms=1000,
-                    stabilize="none",
-                    variant_order_mode="fixed",
-                    warmup_runs=0,
                     resume_run_id=None,
                     tag="",
                     fail_on_error=True,
@@ -253,6 +240,8 @@ class RunScenarioTests(unittest.TestCase):
                 stack,
                 outputs_dir,
                 bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
+                measured_reps=2,
+                warmup_runs=1,
             )
 
             bench_run.run_scenario(
@@ -261,11 +250,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                reps=2,
                 statement_timeout_ms=1000,
-                stabilize="none",
-                variant_order_mode="fixed",
-                warmup_runs=1,
                 resume_run_id=None,
                 tag="",
                 fail_on_error=True,
@@ -299,6 +284,8 @@ class RunScenarioTests(unittest.TestCase):
                 outputs_dir,
                 [metrics] * 6,
                 queries=[q1, q2],
+                measured_reps=2,
+                warmup_runs=1,
             )
             stack.enter_context(
                 patch.object(bench_run, "load_sql_for_query", Mock(side_effect=lambda q: q.query_id))
@@ -310,11 +297,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                reps=2,
                 statement_timeout_ms=1000,
-                stabilize="none",
-                variant_order_mode="fixed",
-                warmup_runs=1,
                 resume_run_id=None,
                 tag="",
                 fail_on_error=True,
@@ -356,17 +339,13 @@ class RunScenarioTests(unittest.TestCase):
                         ("dp",),
                         self.make_resolved_runs(),
                         conn=None,
-                        reps=1,
                         statement_timeout_ms=1000,
-                        stabilize="none",
-                        variant_order_mode="fixed",
-                        warmup_runs=0,
                         resume_run_id=None,
                         tag="resume",
                         fail_on_error=True,
                     )
                 self.assertEqual(run_one_mock.call_count, 2)
-                stabilize_mock.assert_called_once_with("bench_job", "none", None)
+                stabilize_mock.assert_called_once_with("bench_job", None)
 
             run_dir = self.only_run_dir(outputs_dir)
             self.assertEqual([row["query_id"] for row in self.read_raw_rows(run_dir)], ["q1"])
@@ -389,11 +368,7 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp",),
                     self.make_resolved_runs(),
                     conn=None,
-                    reps=1,
                     statement_timeout_ms=1000,
-                    stabilize="none",
-                    variant_order_mode="fixed",
-                    warmup_runs=0,
                     resume_run_id=run_dir.name,
                     tag="resume",
                     fail_on_error=True,
@@ -421,6 +396,7 @@ class RunScenarioTests(unittest.TestCase):
                         KeyboardInterrupt(),
                     ],
                     queries=[q1, q2],
+                    warmup_runs=1,
                 )
                 with self.assertRaises(KeyboardInterrupt):
                     bench_run.run_scenario(
@@ -429,11 +405,7 @@ class RunScenarioTests(unittest.TestCase):
                         ("dp",),
                         self.make_resolved_runs(),
                         conn=None,
-                        reps=1,
                         statement_timeout_ms=1000,
-                        stabilize="none",
-                        variant_order_mode="fixed",
-                        warmup_runs=1,
                         resume_run_id=None,
                         tag="resume-warmup",
                         fail_on_error=True,
@@ -458,6 +430,7 @@ class RunScenarioTests(unittest.TestCase):
                         plan_total_cost=11.0,
                     ),
                     queries=[q1, q2],
+                    warmup_runs=1,
                 )
                 bench_run.run_scenario(
                     self.make_scenario(),
@@ -465,11 +438,7 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp",),
                     self.make_resolved_runs(),
                     conn=None,
-                    reps=1,
                     statement_timeout_ms=1000,
-                    stabilize="none",
-                    variant_order_mode="fixed",
-                    warmup_runs=1,
                     resume_run_id=run_dir.name,
                     tag="resume-warmup",
                     fail_on_error=True,

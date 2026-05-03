@@ -44,7 +44,7 @@ documented in [WORKLOADS.md](WORKLOADS.md).
 4. Apply built-in dataset restrictions, such as the `gpuqo_clique_small` `dp`
    `join_size <= 12` guard.
 5. Check that benchmark databases are reachable and required GUCs exist.
-6. Stabilize each prepared database when requested by the scenario.
+6. Stabilize each prepared database for a new run.
 7. For each selected query, run discarded warmup pass(es), then measured
    repetitions.
 8. Flush `run.json`, `raw.csv`, and `summary.csv` after safe progress
@@ -54,11 +54,17 @@ The runner checkpoints progress after complete warmup groups and complete
 measured groups, so `--resume-run-id` resumes from a safe group boundary rather
 than from the middle of a query's variant set.
 
+`bench_run.py` is the execution driver behind `bench.py run`.  It checks that
+the prepared databases are reachable and that required GUCs exist, resolves the
+full query list up front, writes an initial `run.json`, then loops by dataset,
+query, warmup pass, repetition, and variant.  After each completed warmup group
+or measured group it rewrites `run.json`, `raw.csv`, and `summary.csv`, which
+keeps resume state recoverable without making partially executed variant sets
+look complete.
+
 ## Public Run Protocol
 
-The public benchmark protocol is fixed by the selected scenario and runner.
-These details describe how the test is done; they are not ordinary command-line
-parameters:
+The public benchmark protocol uses these values during `bench.py run`:
 
 - 3 measured repetitions are collected for each selected query and variant.
 - 1 warmup pass is run for each query group before measured repetitions.
@@ -71,8 +77,9 @@ parameters:
   for the same `(dataset, query, variant)` are recorded as skipped timeout rows
   instead of re-running the same timeout-prone statement.
 
-`statement_timeout` is the only public run-protocol value exposed as a CLI
-override.  It is a guardrail for very bad plans, not an algorithm setting.
+The run command accepts `--statement-timeout-ms` for the guardrail timeout.
+Measured repetitions, warmup count, stabilization behavior, and variant-order
+policy are not run options.
 
 ## Cluster Memory Baseline
 
@@ -139,19 +146,15 @@ PostgreSQL build exposes that GUC.
 The harness does not change restart-required cluster settings.  Those must be
 configured outside the benchmark if a submitted run depends on them.
 
-`statement_timeout` is the one public protocol value that may be adjusted from
-the CLI with `--statement-timeout-ms`.  It exists to stop very bad plans from
-occupying the benchmark for too long; it is not intended to tune algorithm
-quality.  If the default `600000 ms` is changed because of machine speed or
-campaign time budget, record the override with the published results.  The
-resolved value is written to `run.json`.
+The run command accepts `--statement-timeout-ms` to adjust the guardrail timeout.
+It exists to stop very bad plans from occupying the benchmark for too long; it
+is not intended to tune algorithm quality.  If the default `600000 ms` is
+changed because of machine speed or campaign time budget, record the override
+with the published results.  The resolved value is written to `run.json`.
 
 ## Stabilization
 
-The built-in public scenarios use the `vacuum_freeze_analyze` stabilization
-mode.
-
-That mode executes:
+Fresh public runs stabilize each prepared database by executing:
 
 ```sql
 VACUUM FREEZE ANALYZE;
@@ -164,7 +167,7 @@ if it is not allowed for the current connection.
 
 ## Warmup And Measurement Order
 
-The fixed public run uses one discarded warmup pass per query group:
+The public run protocol uses one discarded warmup pass per query group:
 
 ```text
 query 1: warm up all selected variants, then measure rep 1..N
@@ -174,9 +177,8 @@ query 2: warm up all selected variants, then measure rep 1..N
 
 Warmup executions are not written to `raw.csv` or `summary.csv`.
 
-The built-in variant order is `rotate`, which rotates variant order across query
-groups and repetitions.  This avoids always measuring the same variant first or
-last for every query.
+The run protocol rotates variant order across query groups and repetitions.
+This avoids always measuring the same variant first or last for every query.
 
 If a warmup execution hits `statement_timeout`, later measured repetitions for
 the exact `(dataset, query, variant)` tuple are recorded as skipped timeout rows

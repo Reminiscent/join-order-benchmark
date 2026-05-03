@@ -198,9 +198,9 @@ rules are documented in [OUTPUTS.md](OUTPUTS.md).
 ## 9. CLI Options
 
 These are the supported `run` options after choosing a scenario.  They select
-what to compare, where to resume, and how to label the local run.  They do not
-change the fixed benchmark protocol, except for the per-statement timeout
-guardrail.
+what to compare, where to resume, and how to label the local run.  Of the
+documented protocol values, only the per-statement timeout guardrail is
+adjustable from this command.
 
 | Option | Use |
 | --- | --- |
