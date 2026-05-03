@@ -53,7 +53,7 @@ class SummaryRow:
 class ReviewTableCell:
     text: str
     raw: float | None = None
-    css_class: str = ""
+    style_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -168,20 +168,20 @@ def format_ratio(value: float | None) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
-def ratio_css_class(value: float | None) -> str:
+def ratio_style_key(value: float | None) -> str:
     if value is None:
         return "missing"
     if value < 0.5:
-        return "ratio ratio-fast-strong"
+        return "ratio_fast_strong"
     if value < 0.8:
-        return "ratio ratio-fast"
+        return "ratio_fast"
     if value < 1.2:
-        return "ratio ratio-neutral"
+        return "ratio_neutral"
     if value < 2.0:
-        return "ratio ratio-slow"
+        return "ratio_slow"
     if value < 10.0:
-        return "ratio ratio-slower"
-    return "ratio ratio-worst"
+        return "ratio_slower"
+    return "ratio_worst"
 
 
 def metric_value(row: SummaryRow | None, metric_column: str) -> float | None:
@@ -301,8 +301,8 @@ def build_review_table(
             values: dict[str, ReviewTableCell] = {}
             for variant in variants:
                 value = metric_value(dataset_rows.get(variant, {}).get(query_id), metric_column)
-                css_class = "numeric" if value is not None else "numeric missing"
-                values[variant] = ReviewTableCell(text=format_ms(value), raw=value, css_class=css_class)
+                style_key = "numeric" if value is not None else "missing"
+                values[variant] = ReviewTableCell(text=format_ms(value), raw=value, style_key=style_key)
 
             reference_value = values[reference].raw
             ratios: dict[str, ReviewTableCell] = {}
@@ -310,7 +310,7 @@ def build_review_table(
                 if variant == reference:
                     continue
                 ratio = ratio_to_reference(values[variant].raw, reference_value)
-                ratios[variant] = ReviewTableCell(text=format_ratio(ratio), raw=ratio, css_class=ratio_css_class(ratio))
+                ratios[variant] = ReviewTableCell(text=format_ratio(ratio), raw=ratio, style_key=ratio_style_key(ratio))
 
             family = query_family(query_id)
             rows.append(
@@ -332,7 +332,7 @@ def build_review_table(
     total_values: dict[str, ReviewTableCell] = {}
     for variant in variants:
         total = sum(row.values[variant].raw or 0.0 for row in rows if row.values[variant].raw is not None)
-        total_values[variant] = ReviewTableCell(text=format_ms(total), raw=total, css_class="numeric total")
+        total_values[variant] = ReviewTableCell(text=format_ms(total), raw=total, style_key="numeric")
 
     total_ratios: dict[str, ReviewTableCell] = {}
     for variant in variants:
@@ -346,7 +346,7 @@ def build_review_table(
         variant_total = sum(row.values[variant].raw or 0.0 for row in comparable_rows)
         reference_total = sum(row.values[reference].raw or 0.0 for row in comparable_rows)
         ratio = ratio_to_reference(variant_total, reference_total)
-        total_ratios[variant] = ReviewTableCell(text=format_ratio(ratio), raw=ratio, css_class=ratio_css_class(ratio))
+        total_ratios[variant] = ReviewTableCell(text=format_ratio(ratio), raw=ratio, style_key=ratio_style_key(ratio))
 
     return ReviewTable(
         run_id=str(run_context.get("run_id", "")),
@@ -378,22 +378,22 @@ def sheet_name(raw: str, used: set[str]) -> str:
 
 
 def xlsx_format_key(cell: ReviewTableCell, *, total: bool = False) -> str:
-    css_class = cell.css_class
-    if "missing" in css_class:
+    style_key = cell.style_key
+    if style_key == "missing":
         return "missing"
-    if "ratio-fast-strong" in css_class:
+    if style_key == "ratio_fast_strong":
         return "total_ratio_fast_strong" if total else "ratio_fast_strong"
-    if "ratio-fast" in css_class:
+    if style_key == "ratio_fast":
         return "total_ratio_fast" if total else "ratio_fast"
-    if "ratio-neutral" in css_class:
+    if style_key == "ratio_neutral":
         return "total_ratio_neutral" if total else "ratio_neutral"
-    if "ratio-slower" in css_class:
+    if style_key == "ratio_slower":
         return "total_ratio_slower" if total else "ratio_slower"
-    if "ratio-slow" in css_class:
+    if style_key == "ratio_slow":
         return "total_ratio_slow" if total else "ratio_slow"
-    if "ratio-worst" in css_class:
+    if style_key == "ratio_worst":
         return "total_ratio_worst" if total else "ratio_worst"
-    if "numeric" in css_class:
+    if style_key == "numeric":
         return "total_numeric" if total else "numeric"
     return "total_text" if total else "text"
 

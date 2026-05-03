@@ -5,19 +5,66 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from bench_common import ConnOpts, die
+from bench_common import ConnOpts, REPO_ROOT, Scenario, Variant, die
 from bench_workloads import (
+    BUILT_IN_VARIANTS,
+    DEFAULT_VARIANTS_FILE,
+    available_datasets,
+    dataset_db_name,
     load_scenarios,
     load_variants,
-    print_datasets,
-    print_scenarios,
-    print_variants,
     resolve_dataset_runs,
     resolve_variant_names,
     resolve_variants_file,
 )
 from bench_prepare import prepare_scenario
 from bench_run import run_scenario
+
+
+def display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def print_scenarios(scenarios: dict[str, Scenario]) -> None:
+    print("Scenarios")
+    print("name\tdatasets\tdescription")
+    for name, scenario in scenarios.items():
+        dataset_names = list(dict.fromkeys(spec.dataset for spec in scenario.datasets))
+        datasets = ", ".join(dataset_names)
+        print(f"{name}\t{datasets}\t{scenario.description}")
+    print()
+
+
+def print_variants(
+    variants: dict[str, Variant],
+    variants_file: Path | None = None,
+) -> None:
+    built_in_names = {variant.name for variant in BUILT_IN_VARIANTS}
+    print("Variants")
+    if variants_file is not None:
+        print(f"extra_variants_file\t{display_path(variants_file)}")
+    print("name\tsource\tlabel")
+    for name in sorted(variants):
+        variant = variants[name]
+        source = "builtin" if name in built_in_names else "extra"
+        print(f"{variant.name}\t{source}\t{variant.label}")
+    if set(variants) == built_in_names:
+        print(
+            f"Hint: {display_path(DEFAULT_VARIANTS_FILE)} was not found; "
+            "pass --variants-file PATH to include patch-specific variants."
+        )
+    print()
+
+
+def print_datasets() -> None:
+    print("Datasets")
+    print("name\tdatabase")
+    for dataset in available_datasets():
+        print(f"{dataset}\t{dataset_db_name(dataset)}")
+    print()
 
 
 def build_parser() -> argparse.ArgumentParser:

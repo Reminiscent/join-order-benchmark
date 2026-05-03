@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_common import DatasetSpec, Scenario
 import bench_workloads
+import bench
 from bench_workloads import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
 
 
@@ -61,7 +62,7 @@ class BenchWorkloadsTests(unittest.TestCase):
         out = io.StringIO()
 
         with redirect_stdout(out):
-            bench_workloads.print_scenarios({"full": self.make_scenario()})
+            bench.print_scenarios({"full": self.make_scenario()})
 
         self.assertEqual(
             out.getvalue(),

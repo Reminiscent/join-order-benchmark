@@ -98,7 +98,7 @@ def run_scenario(
     state = RunState()
     query_counts: list[dict[str, Any]] = []
     stabilized_dbs: set[str] = set()
-    prepared_runs: list[dict[str, Any]] = []
+    prepared_runs: list[PreparedRunWork] = []
 
     # Stage 3: stabilize fresh databases, then resolve all query work before
     # execution.  This makes run.json describe the intended run shape even if
@@ -131,11 +131,11 @@ def run_scenario(
 
         entry_variants = [variants_registry[name] for name in spec.variants]
         prepared_runs.append(
-            {
-                "spec": spec,
-                "entry_variants": entry_variants,
-                "query_plans": query_plans,
-            }
+            PreparedRunWork(
+                spec=spec,
+                entry_variants=entry_variants,
+                query_plans=query_plans,
+            )
         )
 
     run_groups = build_run_groups(prepared_runs)
@@ -245,44 +245,7 @@ def run_scenario(
         completed=state.termination is None,
     )
 
-    warmup_timeout_rows = [
-        row for row in state.warmup_failures if row["category"] == "statement_timeout"
-    ]
-    warmup_error_rows = [row for row in state.warmup_failures if row["category"] == "error"]
-    skipped_timeout_rows = [
-        row
-        for row in state.raw_rows
-        if row["status"] == "timeout"
-        and row["error"].startswith("skipped measured run after warmup timeout:")
-    ]
-    timeout_rows = [
-        row
-        for row in state.raw_rows
-        if row["status"] == "timeout"
-        and not row["error"].startswith("skipped measured run after warmup timeout:")
-    ]
-    err_rows = [row for row in state.raw_rows if row["status"] == "error"]
-
-    print_failure_rows(label="warmup_timeouts", rows=warmup_timeout_rows)
-    print_failure_rows(label="warmup_errors", rows=warmup_error_rows)
-    print_failure_rows(label="skipped_timeouts", rows=skipped_timeout_rows)
-    print_failure_rows(label="timeouts", rows=timeout_rows)
-
-    if state.termination is not None:
-        print(
-            f"[run] terminated phase={state.termination['phase']} "
-            f"dataset={state.termination['dataset']} "
-            f"variant={state.termination['variant']} query={state.termination['query_id']}: "
-            f"{state.termination['error']}"
-        )
-        raise SystemExit(1)
-
-    if err_rows:
-        print_failure_rows(label="errors", rows=err_rows)
-    elif state.warmup_failures or skipped_timeout_rows or timeout_rows:
-        print("[run] completed with non-fatal failures")
-    else:
-        print("[run] completed without errors")
+    summarize_run_completion(state)
 
 
 @dataclass
@@ -314,6 +277,15 @@ class RunGroup:
     query_idx: int
     pass_index: int
     entry_variants: list[Variant]
+
+
+@dataclass(frozen=True)
+class PreparedRunWork:
+    """Resolved query and variant work for one dataset run."""
+
+    spec: ResolvedDatasetRun
+    entry_variants: list[Variant]
+    query_plans: list[tuple[QueryMeta, str]]
 
 
 def load_resume_state(
@@ -573,7 +545,7 @@ def warmup_timeout_skip_error(original_error: str) -> str:
     return f"skipped measured run after warmup timeout: {original_error}"
 
 
-def print_failure_rows(*, label: str, rows: list[dict[str, str]]) -> None:
+def print_failure_rows(*, label: str, rows: list[dict[str, Any]]) -> None:
     """Print a compact failure sample without flooding long benchmark logs."""
 
     if not rows:
@@ -588,6 +560,49 @@ def print_failure_rows(*, label: str, rows: list[dict[str, str]]) -> None:
         print(f"[run] ... and {len(rows) - 5} more {label}")
 
 
+def summarize_run_completion(state: RunState) -> None:
+    """Print the final run status and exit non-zero for fatal termination."""
+
+    warmup_timeout_rows = [
+        row for row in state.warmup_failures if row["category"] == "statement_timeout"
+    ]
+    warmup_error_rows = [row for row in state.warmup_failures if row["category"] == "error"]
+    skipped_timeout_rows = [
+        row
+        for row in state.raw_rows
+        if row["status"] == "timeout"
+        and row["error"].startswith("skipped measured run after warmup timeout:")
+    ]
+    timeout_rows = [
+        row
+        for row in state.raw_rows
+        if row["status"] == "timeout"
+        and not row["error"].startswith("skipped measured run after warmup timeout:")
+    ]
+    err_rows = [row for row in state.raw_rows if row["status"] == "error"]
+
+    print_failure_rows(label="warmup_timeouts", rows=warmup_timeout_rows)
+    print_failure_rows(label="warmup_errors", rows=warmup_error_rows)
+    print_failure_rows(label="skipped_timeouts", rows=skipped_timeout_rows)
+    print_failure_rows(label="timeouts", rows=timeout_rows)
+
+    if state.termination is not None:
+        print(
+            f"[run] terminated phase={state.termination['phase']} "
+            f"dataset={state.termination['dataset']} "
+            f"variant={state.termination['variant']} query={state.termination['query_id']}: "
+            f"{state.termination['error']}"
+        )
+        raise SystemExit(1)
+
+    if err_rows:
+        print_failure_rows(label="errors", rows=err_rows)
+    elif state.warmup_failures or skipped_timeout_rows or timeout_rows:
+        print("[run] completed with non-fatal failures")
+    else:
+        print("[run] completed without errors")
+
+
 def rotate_variants(variants: list[Variant], offset: int) -> list[Variant]:
     """Rotate variant execution order for one query group."""
 
@@ -599,37 +614,34 @@ def rotate_variants(variants: list[Variant], offset: int) -> list[Variant]:
     return list(variants[normalized:]) + list(variants[:normalized])
 
 
-def build_run_groups(prepared_runs: list[dict[str, Any]]) -> list[RunGroup]:
+def build_run_groups(prepared_runs: list[PreparedRunWork]) -> list[RunGroup]:
     """Return the linear checkpoint sequence for warmup and measured work."""
 
     groups: list[RunGroup] = []
     for prepared in prepared_runs:
-        spec = prepared["spec"]
-        entry_variants = prepared["entry_variants"]
-        query_plans = prepared["query_plans"]
-        for query_idx, (query, stmt) in enumerate(query_plans):
+        for query_idx, (query, stmt) in enumerate(prepared.query_plans):
             for warmup_pass in range(1, WARMUP_RUNS + 1):
                 groups.append(
                     RunGroup(
                         phase="warmup",
-                        spec=spec,
+                        spec=prepared.spec,
                         query=query,
                         stmt=stmt,
                         query_idx=query_idx,
                         pass_index=warmup_pass,
-                        entry_variants=entry_variants,
+                        entry_variants=prepared.entry_variants,
                     )
                 )
             for rep in range(1, MEASURED_REPS + 1):
                 groups.append(
                     RunGroup(
                         phase="measured",
-                        spec=spec,
+                        spec=prepared.spec,
                         query=query,
                         stmt=stmt,
                         query_idx=query_idx,
                         pass_index=rep,
-                        entry_variants=entry_variants,
+                        entry_variants=prepared.entry_variants,
                     )
                 )
     return groups
