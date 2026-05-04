@@ -39,7 +39,8 @@ class SummaryRow:
     query_id: str
     join_size: int
     ok_reps: int
-    err_reps: int
+    timeout_reps: int
+    error_reps: int
     planning_ms_median: float | None
     execution_ms_median: float | None
     total_ms_median: float | None
@@ -103,7 +104,8 @@ def load_summary_rows(summary_path: Path) -> tuple[dict[str, dict[str, dict[str,
             "query_id",
             "join_size",
             "ok_reps",
-            "err_reps",
+            "timeout_reps",
+            "error_reps",
             "planning_ms_median",
             "execution_ms_median",
             "total_ms_median",
@@ -121,7 +123,8 @@ def load_summary_rows(summary_path: Path) -> tuple[dict[str, dict[str, dict[str,
                 query_id=raw["query_id"],
                 join_size=int(raw["join_size"]),
                 ok_reps=int(raw["ok_reps"] or "0"),
-                err_reps=int(raw["err_reps"] or "0"),
+                timeout_reps=int(raw["timeout_reps"] or "0"),
+                error_reps=int(raw["error_reps"] or "0"),
                 planning_ms_median=maybe_float(raw["planning_ms_median"]),
                 execution_ms_median=maybe_float(raw["execution_ms_median"]),
                 total_ms_median=maybe_float(raw["total_ms_median"]),

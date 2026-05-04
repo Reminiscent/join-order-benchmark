@@ -507,6 +507,8 @@ def flush_outputs(
         scenario=scenario,
         tag=tag,
         statement_timeout_ms=statement_timeout_ms,
+        measured_reps=MEASURED_REPS,
+        warmup_runs=WARMUP_RUNS,
         effective_variant_contexts=effective_variant_contexts,
         dataset_contexts=dataset_contexts,
     )

@@ -51,7 +51,8 @@ def write_summary_csv(
                 "total_ms_median",
                 "plan_total_cost_median",
                 "ok_reps",
-                "err_reps",
+                "timeout_reps",
+                "error_reps",
             ],
             lineterminator="\n",
         )
@@ -64,7 +65,8 @@ def write_summary_csv(
                     vals = summary_acc.get(key, [])
                     ok = [entry for entry in vals if entry["status"] == "ok"]
                     ok_reps = len(ok)
-                    err_reps = len(vals) - ok_reps
+                    timeout_reps = sum(1 for entry in vals if entry["status"] == "timeout")
+                    error_reps = sum(1 for entry in vals if entry["status"] == "error")
                     if ok:
                         planning_vals = [float(entry["planning_ms"]) for entry in ok]
                         execution_vals = [float(entry["execution_ms"]) for entry in ok]
@@ -80,7 +82,8 @@ def write_summary_csv(
                             "total_ms_median": f"{statistics.median(total_vals):.3f}",
                             "plan_total_cost_median": f"{statistics.median(cost_vals):.3f}",
                             "ok_reps": str(ok_reps),
-                            "err_reps": str(err_reps),
+                            "timeout_reps": str(timeout_reps),
+                            "error_reps": str(error_reps),
                         }
                     else:
                         row = {
@@ -93,7 +96,8 @@ def write_summary_csv(
                             "total_ms_median": "",
                             "plan_total_cost_median": "",
                             "ok_reps": "0",
-                            "err_reps": str(err_reps),
+                            "timeout_reps": str(timeout_reps),
+                            "error_reps": str(error_reps),
                         }
                     writer.writerow(row)
 
@@ -104,6 +108,8 @@ def build_run_context(
     scenario: Any,
     tag: str,
     statement_timeout_ms: int,
+    measured_reps: int,
+    warmup_runs: int,
     effective_variant_contexts: list[dict[str, Any]],
     dataset_contexts: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -112,6 +118,13 @@ def build_run_context(
         "scenario": scenario.name,
         "scenario_description": getattr(scenario, "description", ""),
         "statement_timeout_ms": statement_timeout_ms,
+        "protocol": {
+            "measured_reps": measured_reps,
+            "warmup_runs": warmup_runs,
+            "timing": "off",
+            "variant_order": "rotate_by_query_and_rep",
+            "stats_refresh": "once_per_distinct_database_before_run",
+        },
         "variants": effective_variant_contexts,
         "datasets": [
             {

@@ -70,6 +70,7 @@ Important fields:
 | `scenario` | Scenario name, such as `main`, `extended`, or `full`. |
 | `scenario_description` | Description from the built-in scenario definition. |
 | `statement_timeout_ms` | Per-statement guardrail timeout used during measurement. |
+| `protocol` | Measured reps, warmup runs, timing mode, variant order, and stats refresh rule used by the run. |
 | `variants` | Resolved variant names, labels, and session GUCs used in this run. |
 | `datasets` | Resolved dataset entries and the variants actually run for each entry. |
 | `tag` | Optional user-provided build or patch label. |
@@ -77,9 +78,9 @@ Important fields:
 | `termination` | Fatal termination record, if the run stopped early. |
 
 Use `run.json` when a reviewer needs to check which scenario, variants,
-datasets, and adjustable timeout produced a result table.  The run protocol is
-documented in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) rather than repeated in
-each run context.
+datasets, adjustable timeout, and core execution protocol produced a result
+table.  The full protocol rationale is documented in
+[BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
 
 Restart-required cluster settings, such as `shared_buffers`, are not changed by
 the harness and should be recorded with the published result set when they
@@ -109,6 +110,13 @@ Columns:
 | `status` | `ok`, `timeout`, or `error`. |
 | `error` | Error text for timeout/error rows, otherwise empty. |
 
+Failure rows use these meanings:
+
+| `status` | Meaning |
+| --- | --- |
+| `timeout` | The measured SQL hit `statement_timeout`, or the measured row was skipped because the same query/variant timed out during warmup. |
+| `error` | A non-timeout error occurred; the run exits non-zero after writing the current artifacts. |
+
 Use `raw.csv` when auditing a specific query, timeout, or repetition.
 
 ## `summary.csv`
@@ -130,7 +138,8 @@ Columns:
 | `total_ms_median` | Median `total_ms` over successful measured repetitions. |
 | `plan_total_cost_median` | Median `plan_total_cost` over successful measured repetitions. |
 | `ok_reps` | Number of successful measured repetitions. |
-| `err_reps` | Number of measured rows for this query/variant whose status is not `ok`. |
+| `timeout_reps` | Number of measured rows whose status is `timeout`. |
+| `error_reps` | Number of measured rows whose status is `error`. |
 
 If a query/variant has no successful measured repetition, the median columns are
 empty and `ok_reps` is `0`.

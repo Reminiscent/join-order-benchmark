@@ -41,15 +41,15 @@ class BenchReviewTablesTests(unittest.TestCase):
         (run_dir / "summary.csv").write_text(
             "\n".join(
                 [
-                    "dataset,query_id,join_size,variant,planning_ms_median,execution_ms_median,total_ms_median,plan_total_cost_median,ok_reps,err_reps",
-                    "job,10a,7,dp,2.000,100.000,102.000,1000.000,3,0",
-                    "job,10a,7,my_algo,1.000,80.000,81.000,900.000,3,0",
-                    "job,10a,7,fast_algo,0.500,40.000,40.500,900.000,3,0",
-                    "job,10a,7,bad_algo,30.000,1500.000,1530.000,900.000,3,0",
-                    "job,2a,12,dp,4.000,200.000,204.000,1000.000,3,0",
-                    "job,2a,12,my_algo,8.000,500.000,508.000,900.000,3,0",
-                    "job_complex,1a,9,dp,3.000,300.000,303.000,1000.000,3,0",
-                    "job_complex,1a,9,my_algo,6.000,450.000,456.000,900.000,3,0",
+                    "dataset,query_id,join_size,variant,planning_ms_median,execution_ms_median,total_ms_median,plan_total_cost_median,ok_reps,timeout_reps,error_reps",
+                    "job,10a,7,dp,2.000,100.000,102.000,1000.000,3,0,0",
+                    "job,10a,7,my_algo,1.000,80.000,81.000,900.000,3,0,0",
+                    "job,10a,7,fast_algo,0.500,40.000,40.500,900.000,3,0,0",
+                    "job,10a,7,bad_algo,30.000,1500.000,1530.000,900.000,3,0,0",
+                    "job,2a,12,dp,4.000,200.000,204.000,1000.000,3,0,0",
+                    "job,2a,12,my_algo,8.000,500.000,508.000,900.000,3,0,0",
+                    "job_complex,1a,9,dp,3.000,300.000,303.000,1000.000,3,0,0",
+                    "job_complex,1a,9,my_algo,6.000,450.000,456.000,900.000,3,0,0",
                     "",
                 ]
             )

@@ -36,8 +36,9 @@ python3 bench/bench.py prepare main --host 127.0.0.1 --port 5433 --user postgres
 python3 bench/bench.py run main --host 127.0.0.1 --port 5433 --user postgres --variants dp,geqo
 ```
 
-Libpq environment variables such as `PGHOST`, `PGPORT`, `PGUSER`, and
-`PGSERVICE` work too.  The harness still selects the database names itself.
+Explicit `--host`, `--port`, and `--user` values are passed to libpq.  If those
+flags are omitted, libpq uses its normal environment variables and defaults.
+The harness still selects the database names itself.
 
 ## Discover
 

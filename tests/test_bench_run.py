@@ -26,7 +26,8 @@ def write_summary_csv_stub(summary_path: Path, **_: object) -> None:
     summary_path.write_text(
         (
             "dataset,query_id,join_size,variant,"
-            "planning_ms_median,execution_ms_median,total_ms_median,plan_total_cost_median,ok_reps,err_reps\n"
+            "planning_ms_median,execution_ms_median,total_ms_median,plan_total_cost_median,"
+            "ok_reps,timeout_reps,error_reps\n"
         )
     )
 
@@ -311,7 +312,16 @@ class RunScenarioTests(unittest.TestCase):
                 )
             )
             self.assertEqual(run_context["statement_timeout_ms"], 1000)
-            self.assertNotIn("protocol", run_context)
+            self.assertEqual(
+                run_context["protocol"],
+                {
+                    "measured_reps": 2,
+                    "warmup_runs": 1,
+                    "timing": "off",
+                    "variant_order": "rotate_by_query_and_rep",
+                    "stats_refresh": "once_per_distinct_database_before_run",
+                },
+            )
 
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")
