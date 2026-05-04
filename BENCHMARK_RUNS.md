@@ -46,8 +46,9 @@ Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 
 1. Resolve the scenario, datasets, variants, and query list.
 2. Check that benchmark databases are reachable and required GUCs exist.
-3. Stabilize each prepared database with `VACUUM FREEZE ANALYZE` and a
-   best-effort `CHECKPOINT`.
+3. Stabilize each distinct prepared database with `VACUUM FREEZE ANALYZE` and a
+   best-effort `CHECKPOINT`.  Datasets that share one database, such as `job`
+   and `job_complex`, share this one stabilization step.
 4. Write the initial `run.json` so the intended run shape is visible even if
    the process is interrupted.
 5. For each query group, run discarded warmup pass(es), then measured
@@ -65,7 +66,8 @@ These values define the public benchmark protocol:
 - 3 measured repetitions per selected query and variant.
 - 1 discarded warmup pass per query group.
 - Variant order rotates across query groups and repetitions.
-- Each run refreshes table statistics before any query runs.
+- Each run refreshes table statistics once per distinct database before any
+  query runs.
 - `statement_timeout` defaults to `600000 ms`.
 - Non-timeout warmup or measured errors terminate the run after current
   artifacts are written.
@@ -97,7 +99,9 @@ SET effective_cache_size = '8GB';
 
 Variant settings are applied after the scenario settings.  Optional variant
 GUCs are applied only when the current PostgreSQL build exposes that GUC.  The
-harness does not change restart-required cluster settings.
+harness emits these session settings before every warmup and measured SQL
+because each statement runs in its own `psql` session.  It does not change
+restart-required cluster settings.
 
 ## Timing Collection
 
