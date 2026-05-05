@@ -21,6 +21,16 @@ from bench_prepare import prepare_scenario
 from bench_run import run_scenario
 
 
+def positive_int(raw: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(f"expected integer, got {raw!r}") from e
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"expected integer >= 1, got {value}")
+    return value
+
+
 def display_path(path: Path) -> str:
     try:
         return str(path.resolve().relative_to(REPO_ROOT))
@@ -103,6 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap_run = sub.add_parser("run", help="Run a scenario and write results to outputs/<run_id>/")
     ap_run.add_argument("scenario", help="scenario name (see: list scenarios)")
     ap_run.add_argument("--variants", default=None, help="variant1,variant2 (optional override)")
+    ap_run.add_argument("--min-join", type=positive_int, default=None, help="only run queries with join_size >= N")
     add_variant_file_arg(ap_run)
     ap_run.add_argument(
         "--statement-timeout-ms",
@@ -157,6 +168,7 @@ def main() -> None:
         resolved_runs = resolve_dataset_runs(
             scenario,
             variant_names,
+            min_join=args.min_join,
         )
         run_scenario(
             scenario,

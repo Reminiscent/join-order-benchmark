@@ -143,6 +143,7 @@ semantics, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
 | --- | --- |
 | `--variants` | choose the variants and display/order them explicitly |
 | `--variants-file` | use a different extra variant TOML file |
+| `--min-join` | run only queries with manifest `join_size >= N` |
 | `--statement-timeout-ms` | adjust the per-statement guardrail timeout |
 | `--tag` | record a local build or patch label in `run.json` |
 

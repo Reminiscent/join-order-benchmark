@@ -46,6 +46,12 @@ The built-in baselines are `dp` and `geqo`.  The CLI also loads
 `examples/variants.toml` by default when that file exists; edit that file to
 change the repository's default extra variants.
 
+To focus a scenario on larger joins, add a manifest join-size lower bound:
+
+```bash
+python3 bench/bench.py run full --variants geqo,goo_combined --min-join 12
+```
+
 ## Outputs
 
 Each `run` writes local artifacts under `outputs/<run_id>/`:

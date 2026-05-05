@@ -129,6 +129,7 @@ def build_run_context(
         "datasets": [
             {
                 "dataset": entry["dataset"],
+                "min_join": entry["min_join"],
                 "max_join": entry["max_join"],
                 "variants": entry["variants"],
             }

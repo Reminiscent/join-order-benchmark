@@ -12,10 +12,16 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
-from bench_common import DatasetSpec, Scenario
+from bench_common import DatasetSpec, QueryMeta, ResolvedDatasetRun, Scenario
 import bench_workloads
 import bench
-from bench_workloads import load_scenarios, load_variants, resolve_dataset_runs, resolve_prepare_dataset_runs
+from bench_workloads import (
+    load_scenarios,
+    load_variants,
+    resolve_dataset_runs,
+    resolve_prepare_dataset_runs,
+    select_queries,
+)
 
 
 class BenchWorkloadsTests(unittest.TestCase):
@@ -108,13 +114,55 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
         )
 
         self.assertEqual(
-            [(entry.dataset, entry.max_join, entry.variants) for entry in resolved],
             [
-                ("gpuqo_clique_small", None, ("geqo", "my_algo")),
-                ("gpuqo_clique_small", 12, ("dp",)),
-                ("sqlite_select5", None, ("dp", "geqo", "my_algo")),
+                (entry.dataset, entry.min_join, entry.max_join, entry.variants)
+                for entry in resolved
+            ],
+            [
+                ("gpuqo_clique_small", None, None, ("geqo", "my_algo")),
+                ("gpuqo_clique_small", None, 12, ("dp",)),
+                ("sqlite_select5", None, None, ("dp", "geqo", "my_algo")),
             ],
         )
+
+    def test_dataset_resolution_applies_min_join_override(self) -> None:
+        resolved = resolve_dataset_runs(
+            self.make_scenario(),
+            ("dp", "geqo"),
+            min_join=12,
+        )
+
+        self.assertEqual(
+            [
+                (entry.dataset, entry.min_join, entry.max_join, entry.variants)
+                for entry in resolved
+            ],
+            [
+                ("gpuqo_clique_small", 12, None, ("geqo",)),
+                ("gpuqo_clique_small", 12, 12, ("dp",)),
+                ("sqlite_select5", 12, None, ("dp", "geqo")),
+            ],
+        )
+
+    def test_select_queries_filters_by_min_and_max_join(self) -> None:
+        queries = [
+            QueryMeta("job", "q10", "job/q10.sql", "Q10", 10),
+            QueryMeta("job", "q12", "job/q12.sql", "Q12", 12),
+            QueryMeta("job", "q14", "job/q14.sql", "Q14", 14),
+            QueryMeta("job", "q16", "job/q16.sql", "Q16", 16),
+        ]
+        spec = ResolvedDatasetRun(
+            dataset="job",
+            db="bench_job",
+            min_join=12,
+            max_join=14,
+            variants=("dp",),
+        )
+
+        with patch.object(bench_workloads, "parse_manifest", return_value=queries):
+            selected = select_queries(spec)
+
+        self.assertEqual([q.query_id for q in selected], ["q12", "q14"])
 
 
 if __name__ == "__main__":

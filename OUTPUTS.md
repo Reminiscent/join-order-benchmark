@@ -38,8 +38,8 @@ During a run, the harness prints status and the output directory:
 [run] variants=dp,geqo,my_algo
 [run] warmup_passes=1 measured_reps=3
 [run] outputs=/path/to/join_order_benchmark/outputs/20260412_142110_777847_main
-[run] dataset=job db=imdb_bench queries=113 variants=dp,geqo,my_algo max_join=None
-[run] dataset=job_complex db=imdb_bench queries=30 variants=dp,geqo,my_algo max_join=None
+[run] dataset=job db=imdb_bench queries=113 variants=dp,geqo,my_algo min_join=None max_join=None
+[run] dataset=job_complex db=imdb_bench queries=30 variants=dp,geqo,my_algo min_join=None max_join=None
 [run] completed without errors
 ```
 
@@ -72,7 +72,7 @@ Important fields:
 | `statement_timeout_ms` | Per-statement guardrail timeout used during measurement. |
 | `protocol` | Measured reps, warmup runs, timing mode, variant order, and stats refresh rule used by the run. |
 | `variants` | Resolved variant names, labels, and session GUCs used in this run. |
-| `datasets` | Resolved dataset entries and the variants actually run for each entry. |
+| `datasets` | Resolved dataset entries, join-size filters, and the variants actually run for each entry. |
 | `tag` | Optional user-provided build or patch label. |
 | `warmup_failures` | Warmup timeout/error records, if any. |
 | `termination` | Fatal termination record, if the run stopped early. |

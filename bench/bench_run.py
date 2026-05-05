@@ -99,13 +99,14 @@ def run_scenario(
         dataset_contexts.append(
             {
                 "dataset": spec.dataset,
+                "min_join": spec.min_join,
                 "max_join": spec.max_join,
                 "variants": list(spec.variants),
             }
         )
         print(
             f"[run] dataset={spec.dataset} db={spec.db} queries={len(query_plans)} "
-            f"variants={','.join(spec.variants)} max_join={spec.max_join}"
+            f"variants={','.join(spec.variants)} min_join={spec.min_join} max_join={spec.max_join}"
         )
 
         entry_variants = [variants_registry[name] for name in spec.variants]

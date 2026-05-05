@@ -206,10 +206,15 @@ def resolve_variant_names(
 def resolve_dataset_runs(
     scenario: Scenario,
     variant_names: tuple[str, ...],
+    min_join: Optional[int] = None,
 ) -> list[ResolvedDatasetRun]:
     resolved: list[ResolvedDatasetRun] = []
 
     for spec in scenario.datasets:
+        min_join_values = [
+            value for value in (spec.min_join, min_join) if value is not None
+        ]
+        effective_min_join = max(min_join_values) if min_join_values else None
         if spec.variants is None:
             entry_variants = variant_names
         else:
@@ -223,6 +228,7 @@ def resolve_dataset_runs(
             ResolvedDatasetRun(
                 dataset=spec.dataset,
                 db=dataset_db_name(spec.dataset),
+                min_join=effective_min_join,
                 max_join=spec.max_join,
                 variants=entry_variants,
             )
@@ -383,10 +389,15 @@ def dataset_prepare_scripts(dataset: str) -> tuple[Path, Path, Optional[Path], b
 
 def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
     queries = parse_manifest(spec.dataset)
+    if spec.min_join is not None:
+        queries = [q for q in queries if q.join_size >= spec.min_join]
     if spec.max_join is not None:
         queries = [q for q in queries if q.join_size <= spec.max_join]
     if not queries:
-        die(f"no queries selected (dataset={spec.dataset}, max_join={spec.max_join})")
+        die(
+            f"no queries selected "
+            f"(dataset={spec.dataset}, min_join={spec.min_join}, max_join={spec.max_join})"
+        )
     return queries
 
 
