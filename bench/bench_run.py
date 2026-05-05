@@ -40,18 +40,20 @@ def run_scenario(
     conn: Optional[ConnOpts],
     statement_timeout_ms: int,
     tag: str,
+    reuse_stats: bool = False,
 ) -> None:
     """Execute one resolved benchmark scenario and write run artifacts.
 
-    Each invocation creates a new output directory.  The runner stabilizes each
-    prepared database before executing queries, writes ``raw.csv``,
-    ``summary.csv``, and ``run.json`` as work completes, records
+    Each invocation creates a new output directory.  By default, the runner
+    stabilizes each prepared database before executing queries, writes
+    ``raw.csv``, ``summary.csv``, and ``run.json`` as work completes, records
     ``statement_timeout`` as benchmark data, and exits non-zero on non-timeout
     errors after writing the current artifacts.
     """
 
     if statement_timeout_ms < 0:
         die(f"statement timeout must be >= 0 (got {statement_timeout_ms})")
+    stats_refresh = "reuse_existing" if reuse_stats else "before_run"
 
     # Stage 1: create the output directory and verify that the target PostgreSQL
     # server can run the selected scenario/variant GUCs.
@@ -79,20 +81,22 @@ def run_scenario(
     print(f"[run] scenario={scenario.name}")
     print(f"[run] variants={','.join(variant_names)}")
     print(f"[run] warmup_passes={WARMUP_RUNS} measured_reps={MEASURED_REPS}")
+    print(f"[run] stats_refresh={stats_refresh}")
     print(f"[run] outputs={out_dir}")
 
     state = RunState()
     dataset_contexts: list[dict[str, Any]] = []
-    stabilized_dbs: set[str] = set()
+    processed_dbs: set[str] = set()
     prepared_runs: list[PreparedRunWork] = []
 
-    # Stage 3: stabilize prepared databases, then resolve all query work before
-    # execution.  This fails early on missing SQL files, before measured rows
-    # start to appear in the artifacts.
+    # Stage 3: refresh or reuse database statistics, then resolve all query work
+    # before execution.  This fails early on missing SQL files, before measured
+    # rows start to appear in the artifacts.
     for spec in resolved_runs:
-        if spec.db not in stabilized_dbs:
-            stabilize_db(spec.db, conn)
-            stabilized_dbs.add(spec.db)
+        if spec.db not in processed_dbs:
+            if not reuse_stats:
+                stabilize_db(spec.db, conn)
+            processed_dbs.add(spec.db)
 
         queries = select_queries(spec)
         query_plans = [(q, build_statement(spec.dataset, load_sql_for_query(q))) for q in queries]
@@ -130,6 +134,7 @@ def run_scenario(
             statement_timeout_ms=statement_timeout_ms,
             effective_variant_contexts=effective_variant_contexts,
             dataset_contexts=dataset_contexts,
+            stats_refresh=stats_refresh,
         )
 
     write_current_artifacts()
@@ -489,6 +494,7 @@ def flush_outputs(
     statement_timeout_ms: int,
     effective_variant_contexts: list[dict[str, Any]],
     dataset_contexts: list[dict[str, Any]],
+    stats_refresh: str,
 ) -> None:
     """Write all run artifacts from the current in-memory run state."""
 
@@ -511,6 +517,7 @@ def flush_outputs(
         warmup_runs=WARMUP_RUNS,
         effective_variant_contexts=effective_variant_contexts,
         dataset_contexts=dataset_contexts,
+        stats_refresh=stats_refresh,
     )
     if state.warmup_failures:
         run_context["warmup_failures"] = state.warmup_failures

@@ -112,6 +112,7 @@ def build_run_context(
     warmup_runs: int,
     effective_variant_contexts: list[dict[str, Any]],
     dataset_contexts: list[dict[str, Any]],
+    stats_refresh: str,
 ) -> dict[str, Any]:
     run_context = {
         "run_id": run_id,
@@ -123,7 +124,7 @@ def build_run_context(
             "warmup_runs": warmup_runs,
             "timing": "off",
             "variant_order": "rotate_by_query_and_rep",
-            "stats_refresh": "once_per_distinct_database_before_run",
+            "stats_refresh": stats_refresh,
         },
         "variants": effective_variant_contexts,
         "datasets": [

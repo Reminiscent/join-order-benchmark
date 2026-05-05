@@ -46,9 +46,9 @@ Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 
 1. Resolve the scenario, datasets, variants, and query list.
 2. Check that benchmark databases are reachable and required GUCs exist.
-3. Stabilize each distinct prepared database with `VACUUM FREEZE ANALYZE` and a
-   best-effort `CHECKPOINT`.  Datasets that share one database, such as `job`
-   and `job_complex`, share this one stabilization step.
+3. Unless `--reuse-stats` is passed, stabilize each distinct prepared database
+   with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.  Datasets that
+   share one database, such as `job` and `job_complex`, share this one step.
 4. Write the initial `run.json` so the intended run shape is visible even if
    the process is interrupted.
 5. For each query group, run discarded warmup pass(es), then measured
@@ -66,14 +66,15 @@ These values define the public benchmark protocol:
 - 3 measured repetitions per selected query and variant.
 - 1 discarded warmup pass per query group.
 - Variant order rotates across query groups and repetitions.
-- Each run refreshes table statistics once per distinct database before any
-  query runs.
+- By default, each run refreshes table statistics once per distinct database
+  before any query runs.
 - `statement_timeout` defaults to `600000 ms`.
 - Non-timeout warmup or measured errors terminate the run after current
   artifacts are written.
 
-Measured repetitions, warmup count, statistics-refresh behavior, and variant
-order are fixed by the runner.  `--statement-timeout-ms` only changes the
+Measured repetitions, warmup count, and variant order are fixed by the runner.
+Use `--reuse-stats` only when comparing separate runs that should share the same
+existing statistics snapshot.  `--statement-timeout-ms` only changes the
 guardrail timeout; it is not an algorithm knob.
 
 ## PostgreSQL Settings

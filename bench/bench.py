@@ -114,6 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap_run.add_argument("scenario", help="scenario name (see: list scenarios)")
     ap_run.add_argument("--variants", default=None, help="variant1,variant2 (optional override)")
     ap_run.add_argument("--min-join", type=positive_int, default=None, help="only run queries with join_size >= N")
+    ap_run.add_argument(
+        "--reuse-stats",
+        action="store_true",
+        help="reuse existing database statistics instead of running VACUUM FREEZE ANALYZE and CHECKPOINT",
+    )
     add_variant_file_arg(ap_run)
     ap_run.add_argument(
         "--statement-timeout-ms",
@@ -182,6 +187,7 @@ def main() -> None:
                 else scenario.statement_timeout_ms
             ),
             tag=args.tag,
+            reuse_stats=args.reuse_stats,
         )
         return
 

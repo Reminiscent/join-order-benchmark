@@ -117,6 +117,23 @@ All scenarios share the same default variants.  Use `--variants` to choose the
 algorithms for a run; for `planning`, omitting `dp` is usually more useful
 because large synthetic joins make dynamic programming very slow.
 
+## Reusing Statistics
+
+By default, each `run` refreshes table statistics once per distinct database
+with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.
+
+When comparing separate runs that only change algorithm parameters, run one
+baseline normally, then pass `--reuse-stats` to later runs so they reuse the
+existing statistics snapshot:
+
+```bash
+python3 bench/bench.py run extended --variants my_algo_p1 --min-join 12 --tag p1
+python3 bench/bench.py run extended --variants my_algo_p2 --min-join 12 --reuse-stats --tag p2
+```
+
+Do not recreate data or run `ANALYZE` between runs if the comparison depends on
+stable statistics.
+
 ## Reviewer Workbook
 
 Each run writes local artifacts under `outputs/<run_id>/`:
@@ -146,6 +163,7 @@ The workbook ratio view expects the run to include `dp`.
 | `--variants` | choose the variants and display/order them explicitly |
 | `--variants-file` | use a different extra variant TOML file |
 | `--min-join` | run only queries with manifest `join_size >= N` |
+| `--reuse-stats` | reuse existing database statistics instead of refreshing them |
 | `--statement-timeout-ms` | adjust the per-statement guardrail timeout |
 | `--tag` | record a local build or patch label in `run.json` |
 

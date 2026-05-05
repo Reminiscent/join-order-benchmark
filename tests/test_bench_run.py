@@ -116,7 +116,7 @@ class RunScenarioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"
             outputs_dir.mkdir()
-            self.patch_run_environment(
+            _, stabilize_mock = self.patch_run_environment(
                 stack,
                 outputs_dir,
                 bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
@@ -141,6 +141,7 @@ class RunScenarioTests(unittest.TestCase):
             self.assertTrue(raw_rows[0]["error"].startswith("skipped measured run after warmup timeout:"))
             self.assertEqual(run_context["warmup_failures"][0]["category"], "statement_timeout")
             self.assertNotIn("termination", run_context)
+            stabilize_mock.assert_called_once_with("bench_job", None)
 
     def test_measured_timeout_does_not_abort_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
@@ -317,9 +318,41 @@ class RunScenarioTests(unittest.TestCase):
                     "warmup_runs": 1,
                     "timing": "off",
                     "variant_order": "rotate_by_query_and_rep",
-                    "stats_refresh": "once_per_distinct_database_before_run",
+                    "stats_refresh": "before_run",
                 },
             )
+
+    def test_reuse_stats_skips_database_stabilization(self) -> None:
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            _, stabilize_mock = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                [metrics],
+            )
+
+            bench_run.run_scenario(
+                self.make_scenario(),
+                self.make_variant_registry(),
+                ("dp",),
+                self.make_resolved_runs(),
+                conn=None,
+                statement_timeout_ms=1000,
+                tag="",
+                reuse_stats=True,
+            )
+
+            stabilize_mock.assert_not_called()
+            run_context = self.read_run_context(self.only_run_dir(outputs_dir))
+            self.assertEqual(run_context["protocol"]["stats_refresh"], "reuse_existing")
 
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")
