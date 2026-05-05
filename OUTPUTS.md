@@ -141,6 +141,12 @@ Columns:
 | `timeout_reps` | Number of measured rows whose status is `timeout`. |
 | `error_reps` | Number of measured rows whose status is `error`. |
 
+`join_size` is the base-relation count recorded in
+[tools/query_manifest.csv](tools/query_manifest.csv).  It is computed from the
+flat comma-separated `FROM` lists used by the built-in workloads.  The reviewer
+workbook labels the same value as `joins` for compactness, but it should be read
+as query width in base relations, not as a parsed binary join-operator count.
+
 If a query/variant has no successful measured repetition, the median columns are
 empty and `ok_reps` is `0`.
 

@@ -32,9 +32,21 @@ Schema:
 - `query_label`
   Optional label, mainly for `sqlite_select5`.
 - `join_size`
-  Number of relations in the query's top-level `FROM` clause.
+  Base-relation count used for join-size filters and reviewer tables.  The
+  manifest builder removes full-line `--` comments, captures the first `FROM`
+  chunk up to `WHERE`, `;`, or end of SQL, and counts the comma-separated items
+  in that chunk.
 - `sql_sha1`
   SHA1 of canonicalized SQL after removing formatting-only noise.
+
+`join_size` is intentionally a lightweight workload-manifest metric, not a SQL
+parser result and not the number of binary join operators in a parsed plan.  All
+tracked built-in workloads have been checked to use flat comma-separated
+inner-join `FROM` lists, so this count works for the current benchmark datasets
+and matches the number of base relations in the join-order problem.  The metric
+does not guarantee correct semantics for explicit `JOIN` syntax, outer joins,
+nested subqueries, lateral items, or other SQL shapes that are not a flat
+comma-separated `FROM` list.
 
 ## Refresh
 
