@@ -38,8 +38,8 @@ During a run, the harness prints status and the output directory:
 [run] variants=dp,geqo,my_algo
 [run] warmup_passes=1 measured_reps=3
 [run] outputs=/path/to/join_order_benchmark/outputs/20260412_142110_777847_main
-[run] dataset=job db=imdb_bench queries=113 variants=dp,geqo,my_algo min_join=None max_join=None
-[run] dataset=job_complex db=imdb_bench queries=30 variants=dp,geqo,my_algo min_join=None max_join=None
+[run] dataset=job db=imdb_bench queries=113 variants=dp,geqo,my_algo min_join=None
+[run] dataset=job_complex db=imdb_bench queries=30 variants=dp,geqo,my_algo min_join=None
 [run] completed without errors
 ```
 
@@ -67,12 +67,12 @@ Important fields:
 | Field | Meaning |
 | --- | --- |
 | `run_id` | Output directory id. |
-| `scenario` | Scenario name, such as `main`, `extended`, or `full`. |
+| `scenario` | Scenario name, such as `main`, `extended`, or `planning`. |
 | `scenario_description` | Description from the built-in scenario definition. |
 | `statement_timeout_ms` | Per-statement guardrail timeout used during measurement. |
 | `protocol` | Measured reps, warmup runs, timing mode, variant order, and stats refresh rule used by the run. |
 | `variants` | Resolved variant names, labels, and session GUCs used in this run. |
-| `datasets` | Resolved dataset entries, join-size filters, and the variants actually run for each entry. |
+| `datasets` | Resolved dataset entries, the min-join filter, and the variants actually run for each entry. |
 | `tag` | Optional user-provided build or patch label. |
 | `warmup_failures` | Warmup timeout/error records, if any. |
 | `termination` | Fatal termination record, if the run stopped early. |
@@ -179,7 +179,7 @@ Reviewer tables require `dp` in the selected variant list.  Ratios are direct
 `variant/dp` ratios.  Execution time is the primary result; planning time is a
 separate diagnostic sheet.  All datasets recorded in `run.json` are shown in
 one table, with `dataset` as the first column, so the uploaded attachment count
-stays small even for `extended` and `full` runs.
+stays small even for larger runs.
 
 ### Example Table Shape
 

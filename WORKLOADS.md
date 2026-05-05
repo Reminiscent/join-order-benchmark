@@ -12,26 +12,21 @@ Dataset-level query counts and join sizes come from
 | Scenario | When to use it | Included datasets |
 | --- | --- | --- |
 | `main` | First validation run for a new join-order algorithm | `job`, `job_complex` |
-| `extended` | Broader planning/search-space validation after `main` looks good | `main` plus `sqlite_select5`, `gpuqo_chain_small`, `gpuqo_star_small`, `gpuqo_snowflake_small`, `gpuqo_clique_small` |
-| `full` | Complete built-in campaign | `extended` plus `imdb_ceb_3k` |
+| `extended` | Larger IMDB-backed validation after `main` looks good | `main` plus `imdb_ceb_3k` |
+| `planning` | Synthetic wide-join planning/search-space checks | `sqlite_select5`, `gpuqo_chain_small`, `gpuqo_star_small`, `gpuqo_snowflake_small`, `gpuqo_clique_small` |
 
 `main` is the primary public validation path.  It keeps the campaign small
 enough for iteration while still covering realistic join-order choices.
 
-`extended` keeps all `main` datasets and adds self-contained planning-stress
-workloads adapted from existing upstream sources.  These extra workloads use
-small local data and many wide joins, so they are mainly for planning-time and
-join-search-space validation.  Execution-time results from them are diagnostic
-only and should not be presented as realistic end-to-end workload performance.
+`extended` keeps all `main` datasets and adds `imdb_ceb_3k`, which has much
+higher query volume than the other IMDB-backed workloads and can dominate
+campaign time.
 
-`full` adds `imdb_ceb_3k`, which has much higher query volume than the other
-workloads and can dominate campaign time.
-
-Dynamic programming can become prohibitively slow on dense wide joins.  Since
-the purpose of the planning-stress layer is to stress planner behavior rather
-than prove execution performance on synthetic data, `extended` and `full` limit
-`dp` on `gpuqo_clique_small` to queries with `join_size <= 12`.  Non-`dp`
-variants run the complete 150-query clique set.
+`planning` contains self-contained workloads adapted from existing upstream
+sources.  These datasets use small local data and many wide joins, so they are
+mainly for planning-time and join-search-space validation.  Execution-time
+results from them are diagnostic only and should not be presented as realistic
+end-to-end workload performance.
 
 ## Workload Overview
 
@@ -52,7 +47,7 @@ However, the data is small and synthetic, so their main purpose in this
 repository is to stress join-search behavior and planning time on generated join
 graph shapes.
 
-The self-contained planning-stress datasets use these local data sizes:
+The self-contained planning datasets use these local data sizes:
 
 - `sqlite_select5` has 64 tables with 10 rows per table.
 - `gpuqo_chain_small`, `gpuqo_clique_small`, and `gpuqo_star_small` have 40

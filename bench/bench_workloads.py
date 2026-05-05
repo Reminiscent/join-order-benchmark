@@ -20,7 +20,6 @@ except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib
 
 from bench_common import (
-    DatasetSpec,
     MANIFEST_PATH,
     QueryMeta,
     REPO_ROOT,
@@ -91,17 +90,20 @@ BUILT_IN_VARIANTS = (
 )
 
 MAIN_DATASETS = (
-    DatasetSpec(dataset="job"),
-    DatasetSpec(dataset="job_complex"),
+    "job",
+    "job_complex",
 )
 
-EXTENDED_EXTRA_DATASETS = (
-    DatasetSpec(dataset="sqlite_select5"),
-    DatasetSpec(dataset="gpuqo_chain_small"),
-    DatasetSpec(dataset="gpuqo_star_small"),
-    DatasetSpec(dataset="gpuqo_snowflake_small"),
-    DatasetSpec(dataset="gpuqo_clique_small", exclude_variants=("dp",)),
-    DatasetSpec(dataset="gpuqo_clique_small", variants=("dp",), max_join=12),
+CEB_DATASETS = (
+    "imdb_ceb_3k",
+)
+
+PLANNING_DATASETS = (
+    "sqlite_select5",
+    "gpuqo_chain_small",
+    "gpuqo_star_small",
+    "gpuqo_snowflake_small",
+    "gpuqo_clique_small",
 )
 
 
@@ -109,7 +111,7 @@ def built_in_scenario(
     *,
     name: str,
     description: str,
-    datasets: tuple[DatasetSpec, ...],
+    datasets: tuple[str, ...],
 ) -> Scenario:
     return Scenario(
         name=name,
@@ -168,7 +170,6 @@ def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
 
 
 def load_scenarios() -> dict[str, Scenario]:
-    extended_datasets = MAIN_DATASETS + EXTENDED_EXTRA_DATASETS
     scenarios = (
         built_in_scenario(
             name="main",
@@ -177,13 +178,13 @@ def load_scenarios() -> dict[str, Scenario]:
         ),
         built_in_scenario(
             name="extended",
-            description="Broader validation with self-contained planning-stress workloads, excluding CEB IMDB 3k.",
-            datasets=extended_datasets,
+            description="Main validation plus the heavier CEB IMDB 3k workload.",
+            datasets=MAIN_DATASETS + CEB_DATASETS,
         ),
         built_in_scenario(
-            name="full",
-            description="Complete built-in workload, including the heavy CEB IMDB 3k suite.",
-            datasets=extended_datasets + (DatasetSpec(dataset="imdb_ceb_3k"),),
+            name="planning",
+            description="Self-contained synthetic workloads for planning/search-space stress.",
+            datasets=PLANNING_DATASETS,
         ),
     )
     return {scenario.name: scenario for scenario in scenarios}
@@ -210,27 +211,13 @@ def resolve_dataset_runs(
 ) -> list[ResolvedDatasetRun]:
     resolved: list[ResolvedDatasetRun] = []
 
-    for spec in scenario.datasets:
-        min_join_values = [
-            value for value in (spec.min_join, min_join) if value is not None
-        ]
-        effective_min_join = max(min_join_values) if min_join_values else None
-        if spec.variants is None:
-            entry_variants = variant_names
-        else:
-            entry_variants = tuple(name for name in variant_names if name in spec.variants)
-        if spec.exclude_variants is not None:
-            excluded = set(spec.exclude_variants)
-            entry_variants = tuple(name for name in entry_variants if name not in excluded)
-        if not entry_variants:
-            continue
+    for dataset in scenario.datasets:
         resolved.append(
             ResolvedDatasetRun(
-                dataset=spec.dataset,
-                db=dataset_db_name(spec.dataset),
-                min_join=effective_min_join,
-                max_join=spec.max_join,
-                variants=entry_variants,
+                dataset=dataset,
+                db=dataset_db_name(dataset),
+                variants=variant_names,
+                min_join=min_join,
             )
         )
 
@@ -243,7 +230,7 @@ def resolve_prepare_dataset_runs(
     scenario: Scenario,
 ) -> list[ResolvedDatasetRun]:
     known_datasets = set(available_datasets())
-    datasets = list(dict.fromkeys(spec.dataset for spec in scenario.datasets))
+    datasets = list(dict.fromkeys(scenario.datasets))
 
     resolved: list[ResolvedDatasetRun] = []
     for dataset in datasets:
@@ -253,7 +240,6 @@ def resolve_prepare_dataset_runs(
             ResolvedDatasetRun(
                 dataset=dataset,
                 db=dataset_db_name(dataset),
-                max_join=None,
                 variants=(),
             )
         )
@@ -391,12 +377,10 @@ def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
     queries = parse_manifest(spec.dataset)
     if spec.min_join is not None:
         queries = [q for q in queries if q.join_size >= spec.min_join]
-    if spec.max_join is not None:
-        queries = [q for q in queries if q.join_size <= spec.max_join]
     if not queries:
         die(
             f"no queries selected "
-            f"(dataset={spec.dataset}, min_join={spec.min_join}, max_join={spec.max_join})"
+            f"(dataset={spec.dataset}, min_join={spec.min_join})"
         )
     return queries
 

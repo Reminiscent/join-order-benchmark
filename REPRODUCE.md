@@ -50,8 +50,9 @@ python3 bench/bench.py list datasets
 python3 bench/bench.py list variants
 ```
 
-`main` is the primary public validation scenario.  `extended` adds smaller
-planning-stress workloads.  `full` also adds the heavier CEB IMDB 3k workload.
+`main` is the primary public validation scenario.  `extended` adds the heavier
+CEB IMDB 3k workload.  `planning` contains self-contained synthetic wide-join
+workloads for planning/search-space checks.
 Dataset details are in [WORKLOADS.md](WORKLOADS.md).
 
 ## Variants
@@ -98,23 +99,23 @@ python3 bench/bench.py run main --variants dp,geqo,goo_cost
 
 ## Broader Scenarios
 
-Run `extended` after `main` when broader planning/search-space coverage is
-needed:
+Run `extended` after `main` when broader IMDB-backed coverage is needed:
 
 ```bash
 python3 bench/bench.py prepare extended --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run extended
 ```
 
-Run `full` only for the complete campaign:
+Run `planning` separately for synthetic wide-join planning checks:
 
 ```bash
-python3 bench/bench.py prepare full --csv-dir "$(pwd)/data/imdb_csv"
-python3 bench/bench.py run full
+python3 bench/bench.py prepare planning
+python3 bench/bench.py run planning --variants geqo,goo_combined
 ```
 
-In `extended` and `full`, `gpuqo_clique_small` runs non-`dp` variants on the
-complete workload and limits `dp` to queries with at most 12 joins.
+All scenarios share the same default variants.  Use `--variants` to choose the
+algorithms for a run; for `planning`, omitting `dp` is usually more useful
+because large synthetic joins make dynamic programming very slow.
 
 ## Reviewer Workbook
 
@@ -136,6 +137,7 @@ python3 tools/render_review_tables.py outputs/<run_id>
 
 The script writes `outputs/<run_id>/review.xlsx`.  Workbook layout, `SUM` row
 semantics, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
+The workbook ratio view expects the run to include `dp`.
 
 ## Common Run Options
 

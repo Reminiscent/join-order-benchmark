@@ -24,8 +24,8 @@ discussion.
 | Scenario | Purpose |
 | --- | --- |
 | `main` | Primary validation path on the complete JOB and JOB-Complex workloads. |
-| `extended` | Adds self-contained planning/search-space stress workloads. |
-| `full` | Adds the heavier CEB IMDB 3k workload for the complete built-in campaign. |
+| `extended` | Adds the heavier CEB IMDB 3k workload to `main`. |
+| `planning` | Self-contained synthetic planning/search-space stress workloads. |
 
 ## Quick Run
 
@@ -49,7 +49,7 @@ change the repository's default extra variants.
 To focus a scenario on larger joins, add a manifest join-size lower bound:
 
 ```bash
-python3 bench/bench.py run full --variants geqo,goo_combined --min-join 12
+python3 bench/bench.py run extended --variants geqo,goo_combined --min-join 12
 ```
 
 ## Outputs

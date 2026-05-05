@@ -34,29 +34,19 @@ class Variant:
 
 
 @dataclass(frozen=True)
-class DatasetSpec:
-    dataset: str
-    max_join: Optional[int] = None
-    variants: Optional[tuple[str, ...]] = None
-    exclude_variants: Optional[tuple[str, ...]] = None
-    min_join: Optional[int] = None
-
-
-@dataclass(frozen=True)
 class Scenario:
     name: str
     description: str
     default_variants: tuple[str, ...]
     statement_timeout_ms: int
     session_gucs: tuple[tuple[str, Any], ...]
-    datasets: tuple[DatasetSpec, ...]
+    datasets: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class ResolvedDatasetRun:
     dataset: str
     db: str
-    max_join: Optional[int]
     variants: tuple[str, ...]
     min_join: Optional[int] = None
 

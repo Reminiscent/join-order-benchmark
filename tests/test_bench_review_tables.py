@@ -56,17 +56,27 @@ class BenchReviewTablesTests(unittest.TestCase):
         )
         return run_dir
 
-    @unittest.skipUnless(HAS_XLSXWRITER, "XlsxWriter is optional and only needed for reviewer XLSX tables")
-    def test_renders_review_workbook(self) -> None:
+    def test_review_workbook_render_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = self.make_run_dir(tmpdir)
+            workbook_path = run_dir / "review.xlsx"
+
+            if not HAS_XLSXWRITER:
+                with self.assertRaises(SystemExit) as ctx:
+                    write_review_tables(
+                        run_dir=run_dir,
+                        datasets=[],
+                    )
+
+                self.assertIn("missing optional dependency", str(ctx.exception))
+                self.assertFalse(workbook_path.exists())
+                return
 
             paths = write_review_tables(
                 run_dir=run_dir,
                 datasets=[],
             )
 
-            workbook_path = run_dir / "review.xlsx"
             self.assertEqual(paths, [workbook_path])
             self.assertFalse((run_dir / "review_tables").exists())
             with zipfile.ZipFile(workbook_path) as zf:

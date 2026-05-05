@@ -27,7 +27,6 @@ class BenchResultsTests(unittest.TestCase):
         spec = ResolvedDatasetRun(
             dataset="job",
             db="bench_job",
-            max_join=None,
             variants=("dp",),
         )
         summary_acc = {

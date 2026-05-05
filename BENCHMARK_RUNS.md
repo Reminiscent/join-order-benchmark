@@ -16,15 +16,15 @@ python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-`list scenarios` shows workload groups such as `main`, `extended`, and `full`.
+`list scenarios` shows workload groups such as `main`, `extended`, and `planning`.
 `list datasets` shows the query/data sources.  `list variants` shows built-in
 variants plus `examples/variants.toml` when that default file exists.  Edit
 `examples/variants.toml` to change the default extra variants; use
 `--variants-file` only for a different TOML file.
 
 `main` is the primary public validation scenario.  It runs the complete JOB and
-JOB-Complex workloads.  `extended` adds smaller planning-stress workloads.
-`full` adds the heavier CEB IMDB 3k workload.
+JOB-Complex workloads.  `extended` adds the heavier CEB IMDB 3k workload.
+`planning` contains synthetic wide-join planning/search-space workloads.
 
 ## Prepare Phase
 
@@ -118,7 +118,7 @@ measurement path, so the reported medians and ratios are comparable within a
 run.
 
 `EXPLAIN ANALYZE` is not a zero-overhead client-latency measurement.  For very
-short execution-time queries, especially small planning-stress workloads,
+short execution-time queries, especially small synthetic planning workloads,
 execution-time numbers should be read as diagnostic; planning time is the main
 signal for those workloads.
 

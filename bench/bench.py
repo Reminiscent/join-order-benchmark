@@ -42,7 +42,7 @@ def print_scenarios(scenarios: dict[str, Scenario]) -> None:
     print("Scenarios")
     print("name\tdatasets\tdescription")
     for name, scenario in scenarios.items():
-        dataset_names = list(dict.fromkeys(spec.dataset for spec in scenario.datasets))
+        dataset_names = list(dict.fromkeys(scenario.datasets))
         datasets = ", ".join(dataset_names)
         print(f"{name}\t{datasets}\t{scenario.description}")
     print()

@@ -12,7 +12,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
-from bench_common import DatasetSpec, QueryMeta, ResolvedDatasetRun, Scenario
+from bench_common import QueryMeta, ResolvedDatasetRun, Scenario
 import bench_workloads
 import bench
 from bench_workloads import (
@@ -27,16 +27,12 @@ from bench_workloads import (
 class BenchWorkloadsTests(unittest.TestCase):
     def make_scenario(self) -> Scenario:
         return Scenario(
-            name="full",
+            name="planning",
             description="test scenario",
             default_variants=("dp", "geqo"),
             statement_timeout_ms=1000,
             session_gucs=(),
-            datasets=(
-                DatasetSpec(dataset="gpuqo_clique_small", exclude_variants=("dp",)),
-                DatasetSpec(dataset="gpuqo_clique_small", max_join=12, variants=("dp",)),
-                DatasetSpec(dataset="sqlite_select5"),
-            ),
+            datasets=("gpuqo_clique_small", "sqlite_select5"),
         )
 
     def test_load_variants_uses_default_extra_file_when_present(self) -> None:
@@ -57,24 +53,40 @@ class BenchWorkloadsTests(unittest.TestCase):
     def test_load_scenarios_uses_built_in_definitions(self) -> None:
         scenarios = load_scenarios()
 
-        self.assertEqual(tuple(scenarios), ("main", "extended", "full"))
+        self.assertEqual(tuple(scenarios), ("main", "extended", "planning"))
         self.assertEqual(
-            [spec.dataset for spec in scenarios["main"].datasets],
+            list(scenarios["main"].datasets),
             ["job", "job_complex"],
         )
-        self.assertEqual(scenarios["full"].datasets[-1].dataset, "imdb_ceb_3k")
+        self.assertEqual(
+            list(scenarios["extended"].datasets),
+            ["job", "job_complex", "imdb_ceb_3k"],
+        )
+        self.assertEqual(
+            list(scenarios["planning"].datasets),
+            [
+                "sqlite_select5",
+                "gpuqo_chain_small",
+                "gpuqo_star_small",
+                "gpuqo_snowflake_small",
+                "gpuqo_clique_small",
+            ],
+        )
+        self.assertTrue(
+            all(scenario.default_variants == ("dp", "geqo") for scenario in scenarios.values())
+        )
 
     def test_print_scenarios_omits_default_variants(self) -> None:
         out = io.StringIO()
 
         with redirect_stdout(out):
-            bench.print_scenarios({"full": self.make_scenario()})
+            bench.print_scenarios({"planning": self.make_scenario()})
 
         self.assertEqual(
             out.getvalue(),
             "Scenarios\n"
             "name\tdatasets\tdescription\n"
-            "full\tgpuqo_clique_small, sqlite_select5\ttest scenario\n"
+            "planning\tgpuqo_clique_small, sqlite_select5\ttest scenario\n"
             "\n",
         )
 
@@ -95,7 +107,7 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
         self.assertEqual(tuple(variants), ("dp", "geqo", "my_algo"))
         self.assertEqual(variants["my_algo"].label, "My Algorithm")
 
-    def test_prepare_dataset_resolution_ignores_variant_specific_splits(self) -> None:
+    def test_prepare_dataset_resolution_uses_scenario_datasets(self) -> None:
         resolved = resolve_prepare_dataset_runs(self.make_scenario())
 
         self.assertEqual(
@@ -107,7 +119,7 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
         )
         self.assertTrue(all(entry.variants == () for entry in resolved))
 
-    def test_dataset_resolution_can_select_non_dp_variants(self) -> None:
+    def test_dataset_resolution_uses_selected_variants_for_all_datasets(self) -> None:
         resolved = resolve_dataset_runs(
             self.make_scenario(),
             ("dp", "geqo", "my_algo"),
@@ -115,13 +127,12 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
 
         self.assertEqual(
             [
-                (entry.dataset, entry.min_join, entry.max_join, entry.variants)
+                (entry.dataset, entry.min_join, entry.variants)
                 for entry in resolved
             ],
             [
-                ("gpuqo_clique_small", None, None, ("geqo", "my_algo")),
-                ("gpuqo_clique_small", None, 12, ("dp",)),
-                ("sqlite_select5", None, None, ("dp", "geqo", "my_algo")),
+                ("gpuqo_clique_small", None, ("dp", "geqo", "my_algo")),
+                ("sqlite_select5", None, ("dp", "geqo", "my_algo")),
             ],
         )
 
@@ -134,17 +145,16 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
 
         self.assertEqual(
             [
-                (entry.dataset, entry.min_join, entry.max_join, entry.variants)
+                (entry.dataset, entry.min_join, entry.variants)
                 for entry in resolved
             ],
             [
-                ("gpuqo_clique_small", 12, None, ("geqo",)),
-                ("gpuqo_clique_small", 12, 12, ("dp",)),
-                ("sqlite_select5", 12, None, ("dp", "geqo")),
+                ("gpuqo_clique_small", 12, ("dp", "geqo")),
+                ("sqlite_select5", 12, ("dp", "geqo")),
             ],
         )
 
-    def test_select_queries_filters_by_min_and_max_join(self) -> None:
+    def test_select_queries_filters_by_min_join(self) -> None:
         queries = [
             QueryMeta("job", "q10", "job/q10.sql", "Q10", 10),
             QueryMeta("job", "q12", "job/q12.sql", "Q12", 12),
@@ -155,14 +165,13 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
             dataset="job",
             db="bench_job",
             min_join=12,
-            max_join=14,
             variants=("dp",),
         )
 
         with patch.object(bench_workloads, "parse_manifest", return_value=queries):
             selected = select_queries(spec)
 
-        self.assertEqual([q.query_id for q in selected], ["q12", "q14"])
+        self.assertEqual([q.query_id for q in selected], ["q12", "q14", "q16"])
 
 
 if __name__ == "__main__":
