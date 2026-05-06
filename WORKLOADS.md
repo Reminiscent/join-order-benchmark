@@ -30,16 +30,16 @@ end-to-end workload performance.
 
 ## Workload Overview
 
-| Dataset | Queries | Join Size | Data | Role |
-| --- | ---: | --- | --- | --- |
-| `job` | 113 | 4-17 | external IMDB CSV | classic optimizer baseline with realistic correlations |
-| `job_complex` | 30 | 6-16 | external IMDB CSV | harder predicates, non-PK/FK joins, and challenging join-order choices |
-| `imdb_ceb_3k` | 3,133 | 6-16 | external IMDB CSV | large-volume CEB coverage for long validation campaigns |
-| `sqlite_select5` | 732 | 4-64 | self-contained toy data | high-width join stress without external data files |
-| `gpuqo_chain_small` | 150 | 2-16 | self-contained synthetic data | chain-shaped join graph stress, mainly useful for planning/search-space behavior |
-| `gpuqo_clique_small` | 150 | 2-16 | self-contained synthetic data | dense clique-shaped join graph stress, mainly useful for planning/search-space behavior |
-| `gpuqo_star_small` | 150 | 2-16 | self-contained synthetic data | star-shaped join graph stress, mainly useful for planning/search-space behavior |
-| `gpuqo_snowflake_small` | 390 | 2-40 | self-contained synthetic data | wider snowflake-shaped join graph stress, mainly useful for planning/search-space behavior |
+| Dataset | Queries | Join Size | Join Size >= 12 | Data | Role |
+| --- | ---: | --- | ---: | --- | --- |
+| `job` | 113 | 4-17 | 20 | external IMDB CSV | classic optimizer baseline with realistic correlations |
+| `job_complex` | 30 | 6-16 | 13 | external IMDB CSV | harder predicates, non-PK/FK joins, and challenging join-order choices |
+| `imdb_ceb_3k` | 3,133 | 6-16 | 842 | external IMDB CSV | large-volume CEB coverage for long validation campaigns |
+| `sqlite_select5` | 732 | 4-64 | 636 | self-contained toy data | high-width join stress without external data files |
+| `gpuqo_chain_small` | 150 | 2-16 | 50 | self-contained synthetic data | chain-shaped join graph stress, mainly useful for planning/search-space behavior |
+| `gpuqo_clique_small` | 150 | 2-16 | 50 | self-contained synthetic data | dense clique-shaped join graph stress, mainly useful for planning/search-space behavior |
+| `gpuqo_star_small` | 150 | 2-16 | 50 | self-contained synthetic data | star-shaped join graph stress, mainly useful for planning/search-space behavior |
+| `gpuqo_snowflake_small` | 390 | 2-40 | 290 | self-contained synthetic data | wider snowflake-shaped join graph stress, mainly useful for planning/search-space behavior |
 
 The GPUQO-derived small datasets are not bare query files without data: each
 local dataset has generated `schema.sql`, `load.sql`, and `queries/*.sql`.
