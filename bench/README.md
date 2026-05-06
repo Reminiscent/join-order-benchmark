@@ -1,4 +1,4 @@
-# Benchmark Harness Modules
+# Benchmark Runner Modules
 
 This directory contains the Python implementation behind `bench/bench.py`.  For
 reviewers, start with [../BENCHMARK_RUNS.md](../BENCHMARK_RUNS.md) to understand

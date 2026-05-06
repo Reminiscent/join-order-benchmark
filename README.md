@@ -16,8 +16,8 @@ discussion.
 | Reproduce a run | [REPRODUCE.md](REPRODUCE.md) |
 | Understand the run protocol | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) |
 | Check workload coverage | [WORKLOADS.md](WORKLOADS.md) |
-| Inspect output files and `review.xlsx` | [OUTPUTS.md](OUTPUTS.md) |
-| Read the Python harness | [bench/README.md](bench/README.md) |
+| Inspect output files | [OUTPUTS.md](OUTPUTS.md) |
+| Read the benchmark runner code | [bench/README.md](bench/README.md) |
 
 ## Scenarios
 
@@ -42,9 +42,10 @@ python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-The built-in baselines are `dp` and `geqo`.  The CLI also loads
-`examples/variants.toml` by default when that file exists; edit that file to
-change the repository's default extra variants.
+The built-in baselines are `dp` and `geqo`.  Extra variants, such as additional
+algorithms or alternate parameter settings, are defined in
+`examples/variants.toml`; the CLI loads that file by default when it exists.
+Edit it to change the repository's default extra variants.
 
 To focus a scenario on larger joins, add a manifest join-size lower bound:
 
@@ -77,7 +78,7 @@ layout, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
 
 | Area | Purpose |
 | --- | --- |
-| `bench/` | benchmark CLI and Python harness |
+| `bench/` | benchmark CLI and runner implementation |
 | `examples/` | default extra variant definitions |
 | `tools/` | query manifest and reviewer-table helpers |
 | `tests/` | harness and reviewer-table tests |

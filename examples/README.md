@@ -1,8 +1,9 @@
 # Examples
 
 The portable `dp` and `geqo` baseline variants are built into `bench.py`.
-`variants.toml` is an example extra variant file for experiment-specific
-variants such as GOO or hybrid search settings.
+`variants.toml` is an example extra variant file.  Extra variants can represent
+additional algorithms or alternate parameter settings, such as GOO or hybrid
+search settings.
 
 The built-in scenarios default to the portable baselines.  The CLI automatically
 loads `examples/variants.toml` when this file exists, so pass `--variants-file`

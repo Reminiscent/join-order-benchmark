@@ -57,11 +57,14 @@ Dataset details are in [WORKLOADS.md](WORKLOADS.md).
 
 ## Variants
 
-The portable baseline variants `dp` and `geqo` are built in.  The CLI also
-loads `examples/variants.toml` by default when that file exists.  Edit
-`examples/variants.toml` directly to change the repository's default extra
-variants.  Use `--variants-file` only to replace that default with another TOML
-file.
+A variant is one named run configuration: a label plus the session GUCs needed
+to run it.  It can represent a different join-order algorithm, or the same
+algorithm with different parameters.  The portable baseline variants `dp` and
+`geqo` are built in.
+
+Define extra variants in `examples/variants.toml`.  The CLI loads that file by
+default when it exists.  Use `--variants-file` only to replace that default with
+another TOML file.
 
 Inspect variants from a different file:
 
@@ -114,8 +117,16 @@ python3 bench/bench.py run planning --variants geqo,goo_combined
 ```
 
 All scenarios share the same default variants.  Use `--variants` to choose the
-algorithms for a run; for `planning`, omitting `dp` is usually more useful
-because large synthetic joins make dynamic programming very slow.
+algorithms or parameter settings for a run; for `planning`, omitting `dp` is
+usually more useful because large synthetic joins make dynamic programming very
+slow.
+
+## Join-Size Filter
+
+`--min-join N` selects only queries whose manifest `join_size >= N`.  Here
+`join_size` is the number of base relations in the query's flat `FROM` list,
+recorded in [tools/query_manifest.csv](tools/query_manifest.csv).  For example,
+`--min-join 12` focuses a run on queries involving at least 12 joined tables.
 
 ## Reusing Statistics
 
