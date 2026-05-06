@@ -118,18 +118,6 @@ recording top-level planning and execution times.  All variants use the same
 measurement path, so the reported medians and ratios are comparable within a
 run.
 
-`EXPLAIN ANALYZE` is not a zero-overhead client-latency measurement.  For very
-short execution-time queries, especially small synthetic planning workloads,
-execution-time numbers should be read as diagnostic; planning time is the main
-signal for those workloads.
-
-References:
-
-- PostgreSQL `EXPLAIN` documentation:
-  <https://www.postgresql.org/docs/current/using-explain.html>
-- PostgreSQL `EXPLAIN` command reference:
-  <https://www.postgresql.org/docs/current/sql-explain.html>
-
 ## Timeout Handling
 
 If warmup for a `(dataset, query, variant)` tuple hits `statement_timeout`, the

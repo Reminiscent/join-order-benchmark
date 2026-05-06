@@ -143,10 +143,7 @@ Columns:
 | `error_reps` | Number of measured rows whose status is `error`. |
 
 `join_size` is the base-relation count recorded in
-[tools/query_manifest.csv](tools/query_manifest.csv).  It is computed from the
-flat comma-separated `FROM` lists used by the built-in workloads.  The reviewer
-workbook labels the same value as `joins` for compactness, but it should be read
-as query width in base relations, not as a parsed binary join-operator count.
+[tools/query_manifest.csv](tools/query_manifest.csv).
 
 If a query/variant has no successful measured repetition, the median columns are
 empty and `ok_reps` is `0`.
@@ -176,11 +173,13 @@ The workbook is the reviewer-facing attachment: it has frozen headers, grouped
 metric and ratio columns, number formats, a `SUM` row, and ratio colors.  The
 XLSX export uses optional `XlsxWriter`; benchmark prepare/run does not need it.
 
-Reviewer tables require `dp` in the selected variant list.  Ratios are direct
-`variant/dp` ratios.  Execution time is the primary result; planning time is a
-separate diagnostic sheet.  All datasets recorded in `run.json` are shown in
-one table, with `dataset` as the first column, so the uploaded attachment count
-stays small even for larger runs.
+Ratio columns are direct `variant/reference` ratios: every non-reference
+variant is compared to `dp` when `dp` is selected, and to `geqo` when `geqo` is
+selected.  `dp` and `geqo` are not compared with each other.  For normal
+benchmark scenarios, execution time is the primary result; for the `planning`
+scenario, use the planning-time sheet as the primary signal.  All datasets
+recorded in `run.json` are shown in one table, with `dataset` as the first
+column, so the uploaded attachment count stays small even for larger runs.
 
 ### Example Table Shape
 
@@ -193,19 +192,19 @@ Suppose `summary.csv` contains these median execution times:
 
 The execution sheet in `review.xlsx` is shaped like this:
 
-| dataset | query | joins | DP | GEQO | My Algorithm | GEQO/DP | My Algorithm/DP |
+| dataset | query | joins | DP | GEQO | My Algorithm | My Algorithm/DP | My Algorithm/GEQO |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `job` | `2a` | 12 | 200.00 | 260.00 | 150.00 | 1.30 | 0.75 |
-| `job` | `10a` | 7 | 100.00 | 110.00 | 80.00 | 1.10 | 0.80 |
-| `SUM` |  |  | 300.00 | 370.00 | 230.00 | 1.23 | 0.77 |
+| `job` | `2a` | 12 | 200.00 | 260.00 | 150.00 | 0.75 | 0.58 |
+| `job` | `10a` | 7 | 100.00 | 110.00 | 80.00 | 0.80 | 0.73 |
+| `SUM` |  |  | 300.00 | 370.00 | 230.00 | 0.77 | 0.62 |
 
 The ratio cells are computed as:
 
 ```text
-GEQO/DP for 2a = 260.00 / 200.00 = 1.30
 My Algorithm/DP for 2a = 150.00 / 200.00 = 0.75
-GEQO/DP SUM = (260.00 + 110.00) / (200.00 + 100.00) = 1.23
+My Algorithm/GEQO for 2a = 150.00 / 260.00 = 0.58
 My Algorithm/DP SUM = (150.00 + 80.00) / (200.00 + 100.00) = 0.77
+My Algorithm/GEQO SUM = (150.00 + 80.00) / (260.00 + 110.00) = 0.62
 ```
 
 The planning sheet uses the same layout with `planning_ms_median` values.
@@ -216,13 +215,13 @@ The workbook colors ratio cells to make large changes visible:
 
 | Ratio | Meaning | Color group |
 | ---: | --- | --- |
-| `< 0.50` | much faster than `dp` | dark green |
-| `0.50` through `< 0.80` | faster than `dp` | green |
+| `< 0.50` | much faster than the reference | dark green |
+| `0.50` through `< 0.80` | faster than the reference | green |
 | `0.80` through `< 1.20` | roughly equivalent | neutral |
-| `1.20` through `< 2.00` | slower than `dp` | light red |
-| `2.00` through `< 10.00` | much slower than `dp` | red |
+| `1.20` through `< 2.00` | slower than the reference | light red |
+| `2.00` through `< 10.00` | much slower than the reference | red |
 | `>= 10.00` | severe slowdown | dark red |
 
 Missing metric values are left blank and styled as missing cells.  The `SUM`
-ratio for a variant is computed only over rows where both that variant and `dp`
-have values.
+ratio for a variant/reference pair is computed only over rows where both values
+are present.

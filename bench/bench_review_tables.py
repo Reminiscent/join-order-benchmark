@@ -16,7 +16,7 @@ METRICS = {
 }
 
 DEFAULT_METRICS = ("execution", "planning")
-DEFAULT_REFERENCE_VARIANT = "dp"
+REFERENCE_VARIANTS = ("dp", "geqo")
 XLSX_MISSING_DEPENDENCY = (
     "missing optional dependency: install XlsxWriter before rendering reviewer XLSX tables "
     "(for example: python3 -m pip install XlsxWriter)"
@@ -30,6 +30,8 @@ PUBLIC_LABELS = {
     "goo_combined": "GOO(combined)",
     "hybrid_search": "Hybrid Search",
 }
+
+RatioPair = tuple[str, str]
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,7 @@ class ReviewTableRow:
     query_id: str
     join_size: int
     values: dict[str, ReviewTableCell]
-    ratios: dict[str, ReviewTableCell]
+    ratios: dict[RatioPair, ReviewTableCell]
     family_start: bool = False
 
 
@@ -74,12 +76,13 @@ class ReviewTable:
     metric: str
     metric_column: str
     metric_title: str
-    reference: str
+    ratio_references: tuple[str, ...]
+    ratio_pairs: tuple[RatioPair, ...]
     variants: tuple[str, ...]
     labels: dict[str, str]
     rows: tuple[ReviewTableRow, ...]
     total_values: dict[str, ReviewTableCell]
-    total_ratios: dict[str, ReviewTableCell]
+    total_ratios: dict[RatioPair, ReviewTableCell]
 
 
 def maybe_float(raw: str) -> float | None:
@@ -184,6 +187,20 @@ def ratio_to_reference(value: float | None, reference_value: float | None) -> fl
     return value / reference_value
 
 
+def resolve_ratio_references(variants: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(variant for variant in REFERENCE_VARIANTS if variant in variants)
+
+
+def build_ratio_pairs(variants: tuple[str, ...], references: tuple[str, ...]) -> tuple[RatioPair, ...]:
+    reference_set = set(references)
+    return tuple(
+        (variant, reference)
+        for reference in references
+        for variant in variants
+        if variant not in reference_set
+    )
+
+
 def first_row_for_query(dataset_rows: dict[str, dict[str, SummaryRow]], query_id: str) -> SummaryRow | None:
     for rows_by_query in dataset_rows.values():
         row = rows_by_query.get(query_id)
@@ -256,9 +273,8 @@ def build_review_table(
         selected_datasets=datasets,
         variants_csv=variants_csv,
     )
-    reference = DEFAULT_REFERENCE_VARIANT
-    if reference not in variants:
-        raise SystemExit(f"reference variant '{reference}' is not in the selected variants")
+    ratio_references = resolve_ratio_references(variants)
+    ratio_pairs = build_ratio_pairs(variants, ratio_references)
 
     labels = label_map(run_context, variants)
 
@@ -279,13 +295,11 @@ def build_review_table(
                 style_key = "numeric" if value is not None else "missing"
                 values[variant] = ReviewTableCell(raw=value, style_key=style_key)
 
-            reference_value = values[reference].raw
-            ratios: dict[str, ReviewTableCell] = {}
-            for variant in variants:
-                if variant == reference:
-                    continue
+            ratios: dict[RatioPair, ReviewTableCell] = {}
+            for variant, reference in ratio_pairs:
+                reference_value = values[reference].raw
                 ratio = ratio_to_reference(values[variant].raw, reference_value)
-                ratios[variant] = ReviewTableCell(raw=ratio, style_key=ratio_style_key(ratio))
+                ratios[(variant, reference)] = ReviewTableCell(raw=ratio, style_key=ratio_style_key(ratio))
 
             family = query_family(query_id)
             rows.append(
@@ -309,10 +323,8 @@ def build_review_table(
         total = sum(row.values[variant].raw or 0.0 for row in rows if row.values[variant].raw is not None)
         total_values[variant] = ReviewTableCell(raw=total, style_key="numeric")
 
-    total_ratios: dict[str, ReviewTableCell] = {}
-    for variant in variants:
-        if variant == reference:
-            continue
+    total_ratios: dict[RatioPair, ReviewTableCell] = {}
+    for variant, reference in ratio_pairs:
         comparable_rows = [
             row
             for row in rows
@@ -321,7 +333,7 @@ def build_review_table(
         variant_total = sum(row.values[variant].raw or 0.0 for row in comparable_rows)
         reference_total = sum(row.values[reference].raw or 0.0 for row in comparable_rows)
         ratio = ratio_to_reference(variant_total, reference_total)
-        total_ratios[variant] = ReviewTableCell(raw=ratio, style_key=ratio_style_key(ratio))
+        total_ratios[(variant, reference)] = ReviewTableCell(raw=ratio, style_key=ratio_style_key(ratio))
 
     return ReviewTable(
         run_id=str(run_context.get("run_id", "")),
@@ -330,7 +342,8 @@ def build_review_table(
         metric=metric,
         metric_column=metric_column,
         metric_title=metric_title,
-        reference=reference,
+        ratio_references=ratio_references,
+        ratio_pairs=ratio_pairs,
         variants=variants,
         labels=labels,
         rows=tuple(rows),
@@ -382,6 +395,7 @@ def xlsx_formats(workbook: Any) -> dict[str, Any]:
         "valign": "vcenter",
     }
     numeric = {**border, "align": "right", "num_format": "0.00"}
+    integer = {**border, "align": "right", "num_format": "0"}
     total_base = {
         **border,
         "bold": True,
@@ -405,6 +419,7 @@ def xlsx_formats(workbook: Any) -> dict[str, Any]:
             {**border, "bold": True, "align": "center", "text_wrap": True, "bg_color": "#F3F4F6"}
         ),
         "text": workbook.add_format(border),
+        "integer": workbook.add_format(integer),
         "numeric": workbook.add_format(numeric),
         "missing": workbook.add_format({**border, "bg_color": "#F3F4F6"}),
         "ratio_fast_strong": workbook.add_format({**numeric, "bg_color": "#6AA84F", "font_color": "#FFFFFF"}),
@@ -462,8 +477,8 @@ def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) ->
     value_start = query_cols
     value_end = value_start + len(table.variants) - 1
     ratio_start = value_end + 1
-    ratio_end = ratio_start + len(table.variants) - 2
-    total_cols = query_cols + len(table.variants) + max(0, len(table.variants) - 1)
+    ratio_end = ratio_start + len(table.ratio_pairs) - 1
+    total_cols = query_cols + len(table.variants) + len(table.ratio_pairs)
     last_col = total_cols - 1
 
     title = f"{table.scenario or 'benchmark'} {table.metric_title}"
@@ -471,7 +486,7 @@ def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) ->
 
     meta = (
         f"run={table.run_id}; scenario={table.scenario}; metric={table.metric_column}; "
-        f"reference={table.reference}; ratio=direct variant/{table.reference}"
+        f"references={','.join(table.ratio_references)}; ratio=direct variant/reference"
     )
     write_or_merge(worksheet, 1, 0, 1, last_col, meta, formats["meta"])
 
@@ -487,29 +502,34 @@ def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) ->
         f"median {table.metric_title.lower()} (ms)",
         formats["value_header"],
     )
-    if ratio_start <= ratio_end:
-        write_or_merge(
-            worksheet,
-            3,
-            ratio_start,
-            3,
-            ratio_end,
-            f"ratio to {table.labels[table.reference]}",
-            formats["ratio_header"],
-        )
+    if table.ratio_pairs:
+        col = ratio_start
+        for reference in table.ratio_references:
+            reference_pairs = [pair for pair in table.ratio_pairs if pair[1] == reference]
+            if not reference_pairs:
+                continue
+            end_col = col + len(reference_pairs) - 1
+            write_or_merge(
+                worksheet,
+                3,
+                col,
+                3,
+                end_col,
+                f"ratio to {table.labels[reference]}",
+                formats["ratio_header"],
+            )
+            col = end_col + 1
 
     col = value_start
     for variant in table.variants:
         write_cell(worksheet, 4, col, table.labels[variant], formats["header"])
         col += 1
-    for variant in table.variants:
-        if variant == table.reference:
-            continue
+    for variant, reference in table.ratio_pairs:
         write_cell(
             worksheet,
             4,
             col,
-            f"{table.labels[variant]}/{table.labels[table.reference]}",
+            f"{table.labels[variant]}/{table.labels[reference]}",
             formats["header"],
         )
         col += 1
@@ -518,16 +538,14 @@ def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) ->
     for table_row in table.rows:
         write_cell(worksheet, row_idx, 0, table_row.dataset, formats["text"])
         write_cell(worksheet, row_idx, 1, table_row.query_id, formats["text"])
-        write_cell(worksheet, row_idx, 2, table_row.join_size, formats["numeric"])
+        write_cell(worksheet, row_idx, 2, table_row.join_size, formats["integer"])
         col = value_start
         for variant in table.variants:
             cell = table_row.values[variant]
             write_cell(worksheet, row_idx, col, cell.raw, formats[xlsx_format_key(cell)])
             col += 1
-        for variant in table.variants:
-            if variant == table.reference:
-                continue
-            cell = table_row.ratios[variant]
+        for pair in table.ratio_pairs:
+            cell = table_row.ratios[pair]
             write_cell(worksheet, row_idx, col, cell.raw, formats[xlsx_format_key(cell)])
             col += 1
         row_idx += 1
@@ -538,10 +556,8 @@ def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) ->
         cell = table.total_values[variant]
         write_cell(worksheet, row_idx, col, cell.raw, formats[xlsx_format_key(cell, total=True)])
         col += 1
-    for variant in table.variants:
-        if variant == table.reference:
-            continue
-        cell = table.total_ratios[variant]
+    for pair in table.ratio_pairs:
+        cell = table.total_ratios[pair]
         write_cell(worksheet, row_idx, col, cell.raw, formats[xlsx_format_key(cell, total=True)])
         col += 1
 
@@ -554,7 +570,7 @@ def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) ->
     worksheet.set_column(1, 1, 10)
     worksheet.set_column(2, 2, 8)
     worksheet.set_column(value_start, value_end, 15)
-    if ratio_start <= ratio_end:
+    if table.ratio_pairs:
         worksheet.set_column(ratio_start, ratio_end, 13)
 
 
