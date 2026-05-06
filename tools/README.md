@@ -1,27 +1,51 @@
 # Tools
 
-This directory contains supporting files for the benchmark runner: the tracked
-query manifest and small helper commands.
+This directory contains small support artifacts for running and reviewing
+benchmark results.  The important split is:
 
-## Files
+- `query_manifest.csv` is the tracked workload metadata used by the runner.
+- `build_query_manifest.py` rebuilds and checks that metadata from SQL files.
+- `render_review_tables.py` turns run outputs into the reviewer workbook.
 
-`query_manifest.csv`
+## Query Manifest
 
-- global machine-readable manifest for all benchmark queries
-- used for dataset discovery and join-size filtering
-- checked into git as part of the benchmark artifact
+`query_manifest.csv` is the global machine-readable manifest for all built-in
+benchmark queries.  It is checked into git as part of the benchmark artifact so
+reviewers can inspect workload coverage without scanning every SQL file.
 
-`build_query_manifest.py`
+The runner uses it to:
 
-- rebuilds `query_manifest.csv` from the workload SQL files
-- verifies expected dataset counts and join-size ranges
+- discover available datasets
+- resolve the query list for a scenario
+- apply `--min-join` filters
+- write `join_size` into `summary.csv` and reviewer tables
 
-`render_review_tables.py`
+## Manifest Builder
 
-- renders `outputs/<run_id>/review.xlsx` from `outputs/<run_id>/summary.csv`
-- reads datasets and variant order from `outputs/<run_id>/run.json`
+`build_query_manifest.py` rebuilds `query_manifest.csv` from the workload SQL
+files.  It also verifies expected dataset counts and join-size ranges so
+accidental workload drift is easier to catch.
 
-Schema:
+Run it after adding, removing, or editing workload SQL:
+
+```bash
+python3 tools/build_query_manifest.py --verify --summary
+```
+
+## Review Workbook
+
+`render_review_tables.py` renders `outputs/<run_id>/review.xlsx` from an
+existing run directory.  It reads metrics from `summary.csv` and the dataset /
+variant order from `run.json`.
+
+## Manifest Schema
+
+Example row:
+
+```csv
+dataset,query_id,query_path,query_label,join_size,sql_sha1
+job,10a,join-order-benchmark/queries/10a.sql,,7,1fe1fac887e587704d8acfcf101d8ddb889af0bb
+```
 
 - `dataset`
   Stable dataset id used by the runner.
@@ -47,11 +71,3 @@ and matches the number of base relations in the join-order problem.  The metric
 does not guarantee correct semantics for explicit `JOIN` syntax, outer joins,
 nested subqueries, lateral items, or other SQL shapes that are not a flat
 comma-separated `FROM` list.
-
-## Refresh
-
-To rebuild the query manifest:
-
-```bash
-python3 tools/build_query_manifest.py --verify --summary
-```
