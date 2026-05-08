@@ -180,6 +180,8 @@ benchmark scenarios, execution time is the primary result; for the `planning`
 scenario, use the planning-time sheet as the primary signal.  All datasets
 recorded in `run.json` are shown in one table, with `dataset` as the first
 column, so the uploaded attachment count stays small even for larger runs.
+Workbook column headers use variant labels from `run.json`, falling back to
+variant names when no label is recorded.
 
 ### Example Table Shape
 
@@ -192,7 +194,7 @@ Suppose `summary.csv` contains these median execution times:
 
 The execution sheet in `review.xlsx` is shaped like this:
 
-| dataset | query | joins | DP | GEQO | My Algorithm | My Algorithm/DP | My Algorithm/GEQO |
+| dataset | query | joins | dp | GEQO | My Algorithm | My Algorithm/dp | My Algorithm/GEQO |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `job` | `2a` | 12 | 200.00 | 260.00 | 150.00 | 0.75 | 0.58 |
 | `job` | `10a` | 7 | 100.00 | 110.00 | 80.00 | 0.80 | 0.73 |
@@ -201,9 +203,9 @@ The execution sheet in `review.xlsx` is shaped like this:
 The ratio cells are computed as:
 
 ```text
-My Algorithm/DP for 2a = 150.00 / 200.00 = 0.75
+My Algorithm/dp for 2a = 150.00 / 200.00 = 0.75
 My Algorithm/GEQO for 2a = 150.00 / 260.00 = 0.58
-My Algorithm/DP SUM = (150.00 + 80.00) / (200.00 + 100.00) = 0.77
+My Algorithm/dp SUM = (150.00 + 80.00) / (200.00 + 100.00) = 0.77
 My Algorithm/GEQO SUM = (150.00 + 80.00) / (260.00 + 110.00) = 0.62
 ```
 

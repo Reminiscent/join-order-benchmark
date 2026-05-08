@@ -44,7 +44,7 @@ class RunScenarioTests(unittest.TestCase):
         )
 
     def make_variant_registry(self) -> dict[str, Variant]:
-        return {"dp": Variant(name="dp", label="DP", session_gucs=())}
+        return {"dp": Variant(name="dp", label="dp", session_gucs=())}
 
     def make_resolved_runs(self) -> list[ResolvedDatasetRun]:
         return [
@@ -234,7 +234,7 @@ class RunScenarioTests(unittest.TestCase):
             plan_total_cost=4.0,
         )
         variants = {
-            "dp": Variant(name="dp", label="DP", session_gucs=()),
+            "dp": Variant(name="dp", label="dp", session_gucs=()),
             "geqo": Variant(name="geqo", label="GEQO", session_gucs=()),
         }
         resolved_runs = [

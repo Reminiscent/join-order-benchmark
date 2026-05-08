@@ -57,7 +57,7 @@ DEFAULT_SESSION_GUCS = (
 BUILT_IN_VARIANTS = (
     Variant(
         name="dp",
-        label="Dynamic Programming",
+        label="dp",
         session_gucs=(("geqo_threshold", 100),),
         optional_session_gucs=(("enable_goo_join_search", "off"),),
     ),

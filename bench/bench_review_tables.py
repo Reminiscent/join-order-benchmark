@@ -27,15 +27,6 @@ XLSX_MISSING_DEPENDENCY = (
     "missing optional dependency: install XlsxWriter before rendering reviewer XLSX tables "
     "(for example: python3 -m pip install XlsxWriter)"
 )
-PUBLIC_LABELS = {
-    "dp": "DP",
-    "geqo": "GEQO",
-    "goo_cost": "GOO(cost)",
-    "goo_result_size": "GOO(result_size)",
-    "goo_selectivity": "GOO(selectivity)",
-    "goo_combined": "GOO(combined)",
-    "hybrid_search": "Hybrid Search",
-}
 RATIO_STYLE_KEYS = {
     "ratio_fast_strong",
     "ratio_fast",
@@ -115,14 +106,6 @@ def maybe_float(raw: str) -> float | None:
     if not text:
         return None
     return float(text)
-
-
-def public_label(variant: str, label_by_name: dict[str, str]) -> str:
-    """Resolve the reviewer-facing label for a variant name.
-
-    Built-in labels win, then the run metadata label, then the raw variant name.
-    """
-    return PUBLIC_LABELS.get(variant, label_by_name.get(variant, variant))
 
 
 def load_summary_rows(
@@ -299,13 +282,13 @@ def resolve_combined_variant_order(
 
 
 def label_map(run_context: dict[str, Any], variants: tuple[str, ...]) -> dict[str, str]:
-    """Build the final display label map for selected variants."""
+    """Build display labels from run metadata, falling back to variant names."""
     labels = {
         str(entry.get("name")): str(entry.get("label") or entry.get("name"))
         for entry in run_context.get("variants", [])
         if isinstance(entry, dict) and entry.get("name")
     }
-    return {variant: public_label(variant, labels) for variant in variants}
+    return {variant: labels.get(variant, variant) for variant in variants}
 
 
 # Review table construction.

@@ -36,7 +36,7 @@ class BenchReviewTablesTests(unittest.TestCase):
                     "run_id": "run1",
                     "scenario": "main",
                     "variants": [
-                        {"name": "dp", "label": "Dynamic Programming"},
+                        {"name": "dp", "label": "dp"},
                         {"name": "geqo", "label": "GEQO"},
                         {"name": "my_algo", "label": "My Algorithm"},
                         {"name": "fast_algo", "label": "Fast Algorithm"},
@@ -174,6 +174,28 @@ class BenchReviewTablesTests(unittest.TestCase):
         self.assertEqual(table.ratio_pairs, (("my_algo", "geqo"),))
         row_10a = next(row for row in table.rows if row.query_id == "10a")
         self.assertAlmostEqual(row_10a.ratios[("my_algo", "geqo")].raw or 0.0, 0.64)
+
+    def test_review_labels_come_from_run_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = self.make_run_dir(tmpdir)
+            run_context = json.loads((run_dir / "run.json").read_text())
+            for entry in run_context["variants"]:
+                if entry["name"] == "fast_algo":
+                    entry.pop("label")
+            rows_by_dataset, query_order = load_summary_rows(run_dir / "summary.csv")
+
+            table = build_review_table(
+                run_context=run_context,
+                rows_by_dataset=rows_by_dataset,
+                query_order=query_order,
+                datasets=["job"],
+                metric="execution",
+                variants_csv="dp,my_algo,fast_algo",
+            )
+
+        self.assertEqual(table.labels["dp"], "dp")
+        self.assertEqual(table.labels["my_algo"], "My Algorithm")
+        self.assertEqual(table.labels["fast_algo"], "fast_algo")
 
     def test_worksheet_writes_integer_join_size_and_geqo_ratio(self) -> None:
         class FakeWorkbook:
