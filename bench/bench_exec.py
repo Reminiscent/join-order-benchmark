@@ -24,6 +24,9 @@ from bench_common import (
 )
 
 
+# Data returned to bench_run.py.
+
+
 @dataclass(frozen=True)
 class RunMetrics:
     """Timing and optimizer-cost fields extracted from EXPLAIN JSON output."""
@@ -36,6 +39,9 @@ class RunMetrics:
 
 class StatementTimeoutError(RuntimeError):
     """Raised when PostgreSQL cancels a statement due to statement_timeout."""
+
+
+# Main statement execution.
 
 
 def run_one_statement(
@@ -78,71 +84,7 @@ def run_one_statement(
     return parse_explain_json(payload)
 
 
-def stabilize_db(
-    db: str,
-    conn: Optional[ConnOpts] = None,
-) -> None:
-    """Create the statistics snapshot used by a fresh benchmark run.
-
-    ``VACUUM FREEZE ANALYZE`` refreshes table statistics and freezes tuples so
-    measured queries are not mixed with autovacuum-style maintenance effects.
-    ``CHECKPOINT`` is best-effort because some environments do not allow it, and
-    failure there should not hide an otherwise usable benchmark database.
-    """
-
-    psql_sql(db, "VACUUM FREEZE ANALYZE;", conn=conn, check=True)
-    psql_sql(db, "CHECKPOINT;", conn=conn, check=False)
-
-
-def ensure_databases_reachable(dbs: list[str], conn: Optional[ConnOpts] = None) -> None:
-    """Fail early when a benchmark database cannot be reached."""
-
-    for db in dbs:
-        p = run_cmd(psql_cmd(db, conn) + ["-At"], input_text="SELECT 1;\n", check=False)
-        if p.returncode == 0:
-            continue
-        out = (p.stdout or "") + (p.stderr or "")
-        die(
-            f"cannot connect to benchmark database '{db}': "
-            f"{first_error_line(out) or 'connection failed'}. "
-            "Run prepare first, reuse an existing database, or fix the PostgreSQL connection flags."
-        )
-
-
-def validate_required_gucs(
-    db: str,
-    conn: Optional[ConnOpts],
-    scenario: Scenario,
-    variants_registry: dict[str, Variant],
-    variant_names: tuple[str, ...],
-) -> None:
-    """Verify that mandatory scenario and variant GUCs exist on the server."""
-
-    missing_scenario = [
-        name for name, _ in scenario.session_gucs if current_setting(db, name, conn) is None
-    ]
-    if missing_scenario:
-        die(
-            f"scenario '{scenario.name}' requires unsupported PostgreSQL parameter(s): "
-            f"{', '.join(sorted(missing_scenario))}"
-        )
-
-    missing_by_variant: list[str] = []
-    for variant_name in variant_names:
-        variant = variants_registry[variant_name]
-        missing = [
-            name
-            for name, _ in variant.session_gucs
-            if current_setting(db, name, conn) is None
-        ]
-        if missing:
-            missing_by_variant.append(f"{variant_name}: {', '.join(sorted(missing))}")
-
-    if missing_by_variant:
-        die(
-            "selected variant(s) require unsupported PostgreSQL parameter(s): "
-            + " | ".join(missing_by_variant)
-        )
+# Per-statement session script construction.
 
 
 def resolved_variant_session_gucs(
@@ -171,10 +113,10 @@ def build_session_prelude(
     lines = ["RESET ALL;"]
     lines.append(f"SET statement_timeout = {statement_timeout_ms};")
     lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in scenario_session_gucs)
-    lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in variant.session_gucs)
-    for k, v in variant.optional_session_gucs:
-        if guc_exists(db, conn, k):
-            lines.append(f"SET {k} = {sql_literal(v)};")
+    lines.extend(
+        f"SET {k} = {sql_literal(v)};"
+        for k, v in resolved_variant_session_gucs(db, conn, variant)
+    )
     return lines
 
 
@@ -182,6 +124,9 @@ def explain_sql(stmt: str) -> str:
     """Wrap a benchmark query in the EXPLAIN mode used by public artifacts."""
 
     return f"EXPLAIN (ANALYZE, TIMING OFF, SUMMARY ON, FORMAT JSON, SETTINGS ON) {stmt}"
+
+
+# EXPLAIN JSON parsing.
 
 
 def parse_explain_json(payload: str) -> RunMetrics:
@@ -232,6 +177,79 @@ def parse_explain_json(payload: str) -> RunMetrics:
     )
 
 
+# Run setup and validation.
+
+
+def stabilize_db(
+    db: str,
+    conn: Optional[ConnOpts] = None,
+) -> None:
+    """Create the statistics snapshot used by a fresh benchmark run.
+
+    ``VACUUM FREEZE ANALYZE`` refreshes table statistics and freezes tuples so
+    measured queries are not mixed with autovacuum-style maintenance effects.
+    ``CHECKPOINT`` is best-effort because some environments do not allow it, and
+    failure there should not hide an otherwise usable benchmark database.
+    """
+
+    psql_sql(db, "VACUUM FREEZE ANALYZE;", conn=conn, check=True)
+    psql_sql(db, "CHECKPOINT;", conn=conn, check=False)
+
+
+def ensure_databases_reachable(dbs: list[str], conn: Optional[ConnOpts] = None) -> None:
+    """Fail early when a benchmark database cannot be reached."""
+
+    for db in dbs:
+        p = run_cmd(psql_cmd(db, conn) + ["-At"], input_text="SELECT 1;\n", check=False)
+        if p.returncode == 0:
+            continue
+        out = (p.stdout or "") + (p.stderr or "")
+        die(
+            f"cannot connect to benchmark database '{db}': "
+            f"{first_error_line(out) or 'connection failed'}. "
+            "Run prepare first, reuse an existing database, or fix the PostgreSQL connection flags."
+        )
+
+
+def validate_required_gucs(
+    db: str,
+    conn: Optional[ConnOpts],
+    scenario: Scenario,
+    variants_registry: dict[str, Variant],
+    variant_names: tuple[str, ...],
+) -> None:
+    """Verify that mandatory scenario and variant GUCs exist on the server."""
+
+    missing_scenario = [
+        name for name, _ in scenario.session_gucs if not guc_exists(db, conn, name)
+    ]
+    if missing_scenario:
+        die(
+            f"scenario '{scenario.name}' requires unsupported PostgreSQL parameter(s): "
+            f"{', '.join(sorted(missing_scenario))}"
+        )
+
+    missing_by_variant: list[str] = []
+    for variant_name in variant_names:
+        variant = variants_registry[variant_name]
+        missing = [
+            name
+            for name, _ in variant.session_gucs
+            if not guc_exists(db, conn, name)
+        ]
+        if missing:
+            missing_by_variant.append(f"{variant_name}: {', '.join(sorted(missing))}")
+
+    if missing_by_variant:
+        die(
+            "selected variant(s) require unsupported PostgreSQL parameter(s): "
+            + " | ".join(missing_by_variant)
+        )
+
+
+# PostgreSQL GUC lookup.
+
+
 def current_setting(db: str, name: str, conn: Optional[ConnOpts] = None) -> Optional[str]:
     """Return a PostgreSQL setting value, or None when the setting is absent."""
 
@@ -248,6 +266,9 @@ def guc_exists(db: str, conn: Optional[ConnOpts], name: str) -> bool:
     """Return whether the server recognizes a GUC name."""
 
     return current_setting(db, name, conn) is not None
+
+
+# psql error classification.
 
 
 def first_error_line(output: str) -> str:
