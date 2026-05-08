@@ -64,7 +64,8 @@ These values define the public benchmark protocol:
 
 - 3 measured repetitions per selected query and variant.
 - 1 discarded warmup pass per query group.
-- Variant order rotates across query groups and repetitions.
+- Variant order rotates across query groups and measured repetitions; warmup
+  pass order uses the same rotation rule.
 - By default, each run refreshes table statistics once per distinct database
   before any query runs.
 - `statement_timeout` defaults to `600000 ms`.

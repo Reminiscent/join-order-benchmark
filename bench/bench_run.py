@@ -35,6 +35,8 @@ from bench_results import build_run_context, write_raw_csv, write_run_context, w
 
 MEASURED_REPS = 3
 WARMUP_RUNS = 1
+# A warmup timeout is benchmark data, not a harness failure.  Keep its marker
+# stable because measured rows use it to distinguish skipped timeout rows.
 WARMUP_TIMEOUT_CATEGORY = "statement_timeout"
 WARMUP_TIMEOUT_SKIP_PREFIX = "skipped measured run after warmup timeout:"
 
@@ -46,19 +48,25 @@ WARMUP_TIMEOUT_SKIP_PREFIX = "skipped measured run after warmup timeout:"
 class RunState:
     """Mutable rows and failure state for one benchmark run."""
 
+    # raw.csv contains measured rows only; warmup rows are tracked separately.
     raw_rows: list[dict[str, str]] = field(default_factory=list)
+    # summary.csv is regenerated from numeric accumulator rows on every flush.
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = field(default_factory=dict)
+    # Warmup failures are persisted in run.json for debugging skipped work.
     warmup_failures: list[dict[str, Any]] = field(default_factory=list)
+    # Query/variant pairs that timed out during warmup are skipped in measured reps.
     warmup_timeout_keys: set[tuple[str, str, str]] = field(default_factory=set)
+    # Non-timeout errors stop the run after the latest artifacts are written.
     termination: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
 class PreparedRunWork:
-    """Resolved query and variant work for one dataset run."""
+    """Dataset work item after query SQL and variant objects are resolved."""
 
     spec: ResolvedDatasetRun
     entry_variants: list[Variant]
+    # Each entry is the query metadata plus the final SQL statement to execute.
     query_plans: list[tuple[QueryMeta, str]]
 
 
@@ -99,6 +107,8 @@ def run_scenario(
     dbs = sorted({entry.db for entry in resolved_runs})
     ensure_databases_reachable(dbs, conn)
     validate_required_gucs(dbs[0], conn, scenario, variants_registry, variant_names)
+    # Snapshot the variant GUCs that this server will actually receive.  Optional
+    # GUCs are included only when supported, so run.json remains reproducible.
     effective_variant_contexts = [
         {
             "name": variants_registry[name].name,
@@ -123,11 +133,12 @@ def run_scenario(
     processed_dbs: set[str] = set()
     prepared_runs: list[PreparedRunWork] = []
 
-    # Stage 3: refresh or reuse database statistics, then resolve all query work
-    # before execution.  This fails early on missing SQL files, before measured
-    # rows start to appear in the artifacts.
+    # Stage 3: refresh or reuse database statistics, then build the exact query
+    # list and SQL statements that will run.  This catches missing SQL files
+    # before measured rows start to appear in the artifacts.
     for spec in resolved_runs:
         if spec.db not in processed_dbs:
+            # Multiple dataset entries can target the same database; refresh it once.
             if not reuse_stats:
                 stabilize_db(spec.db, conn)
             processed_dbs.add(spec.db)
@@ -158,6 +169,7 @@ def run_scenario(
     # Stage 4: write run.json before executing groups so the output directory
     # immediately records the requested scenario, datasets, and variants.
     def write_current_artifacts() -> None:
+        # Flush the whole artifact set from memory so interrupted runs remain inspectable.
         flush_outputs(
             out_dir=out_dir,
             run_id=run_id,
@@ -173,8 +185,8 @@ def run_scenario(
 
     write_current_artifacts()
 
-    # Stage 5: execute warmup and measured groups.  Each group is one query plus
-    # all selected variants for one warmup pass or measured repetition.
+    # Stage 5: execute warmup and measured groups.  Each measured repetition
+    # runs all variants once for the same query, with the variant order rotated.
     for prepared in prepared_runs:
         for query_idx, (query, stmt) in enumerate(prepared.query_plans):
             for warmup_pass in range(1, WARMUP_RUNS + 1):
@@ -252,6 +264,7 @@ def execute_warmup_group(
     statement timeout during warmup.
     """
 
+    # Example with [dp, geqo, my_algo]: offsets 0/1/2 run dp/geqo/my_algo first.
     ordered_variants = rotate_variants(entry_variants, query_idx + warmup_pass - 1)
     for variant in ordered_variants:
         try:
@@ -264,6 +277,7 @@ def execute_warmup_group(
                 statement_timeout_ms=statement_timeout_ms,
             )
         except StatementTimeoutError as e:
+            # Timeout is a valid benchmark outcome; measured reps will record skipped rows.
             warmup_timeout_keys.add((spec.dataset, query.query_id, variant.name))
             record_warmup_failure(
                 warmup_failures=warmup_failures,
@@ -275,6 +289,7 @@ def execute_warmup_group(
                 category=WARMUP_TIMEOUT_CATEGORY,
             )
         except Exception as e:
+            # Other warmup errors usually mean the run is invalid, so stop after recording.
             record_warmup_failure(
                 warmup_failures=warmup_failures,
                 warmup_pass=warmup_pass,
@@ -319,18 +334,21 @@ def execute_measured_group(
     error row is recorded.
     """
 
+    # Repetitions rotate too, so a fixed variant is not always first for a query.
     ordered_variants = rotate_variants(entry_variants, query_idx + rep - 1)
     termination: dict[str, Any] | None = None
     for variant in ordered_variants:
         key = (spec.dataset, query.query_id, variant.name)
         status = "ok"
         err = ""
+        # Negative sentinels serialize to blank CSV cells when no metric exists.
         planning_ms = -1.0
         total_ms = -1.0
         exec_ms = -1.0
         plan_total_cost = -1.0
 
         if key in warmup_timeout_keys:
+            # Avoid spending measured reps on a query/variant that already timed out.
             status = "timeout"
             err = warmup_timeout_skip_error("ERROR: canceling statement due to statement timeout")
         else:
@@ -348,9 +366,11 @@ def execute_measured_group(
                 plan_total_cost = metrics.plan_total_cost
                 exec_ms = metrics.execution_ms
             except StatementTimeoutError as e:
+                # A measured timeout is reported but does not abort the benchmark run.
                 status = "timeout"
                 err = str(e)
             except Exception as e:
+                # Non-timeout execution errors are fatal, but the row is still preserved.
                 status = "error"
                 err = str(e)
                 if termination is None:
@@ -380,6 +400,7 @@ def execute_measured_group(
             }
         )
 
+        # Keep numeric values for summary calculations; raw.csv stores formatted strings.
         summary_acc.setdefault(key, []).append(
             {
                 "rep": rep,
@@ -440,9 +461,10 @@ def print_failure_rows(*, label: str, rows: list[dict[str, Any]]) -> None:
     if not rows:
         return
     print(f"[run] {label}={len(rows)}")
+    sample_label = label.removesuffix("s")
     for row in rows[:5]:
         print(
-            f"[run] {label[:-1]} dataset={row['dataset']} variant={row['variant']} "
+            f"[run] {sample_label} dataset={row['dataset']} variant={row['variant']} "
             f"query={row['query_id']}: {row['error']}"
         )
     if len(rows) > 5:
@@ -452,6 +474,8 @@ def print_failure_rows(*, label: str, rows: list[dict[str, Any]]) -> None:
 def summarize_run_completion(state: RunState) -> None:
     """Print the final run status and exit non-zero for fatal termination."""
 
+    # Split timeout classes so direct measured timeouts and warmup-skipped rows
+    # remain distinguishable in both logs and output artifacts.
     warmup_timeout_rows = [
         row for row in state.warmup_failures if row["category"] == WARMUP_TIMEOUT_CATEGORY
     ]
@@ -534,6 +558,7 @@ def flush_outputs(
         summary_acc=state.summary_acc,
     )
 
+    # run.json captures configuration/protocol metadata plus the latest failure state.
     run_context = build_run_context(
         run_id=run_id,
         scenario=scenario,
