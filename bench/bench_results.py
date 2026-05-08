@@ -12,7 +12,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-from bench_workloads import select_queries
+from bench_config import select_queries
 
 
 RAW_CSV_FIELDS = [
@@ -126,7 +126,7 @@ def build_run_context(
     run_id: str,
     scenario: Any,
     tag: str,
-    statement_timeout_ms: int,
+    run_session_gucs: tuple[tuple[str, Any], ...],
     measured_reps: int,
     warmup_runs: int,
     effective_variant_contexts: list[dict[str, Any]],
@@ -138,7 +138,7 @@ def build_run_context(
         "run_id": run_id,
         "scenario": scenario.name,
         "scenario_description": getattr(scenario, "description", ""),
-        "statement_timeout_ms": statement_timeout_ms,
+        "session_gucs": [{k: v} for k, v in run_session_gucs],
         "protocol": {
             "measured_reps": measured_reps,
             "warmup_runs": warmup_runs,

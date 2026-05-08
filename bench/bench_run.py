@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from bench_workloads import build_statement, load_sql_for_query, select_queries
+from bench_config import build_statement, load_sql_for_query, select_queries
 from bench_common import (
     ConnOpts,
     OUTPUTS_DIR,
@@ -18,7 +18,6 @@ from bench_common import (
     ResolvedDatasetRun,
     Scenario,
     Variant,
-    die,
     safe_artifact_name,
     utc_now,
 )
@@ -27,7 +26,7 @@ from bench_exec import (
     ensure_databases_reachable,
     run_one_statement,
     stabilize_db,
-    validate_required_gucs,
+    validate_session_gucs,
 )
 from bench_results import build_run_context, write_raw_csv, write_run_context, write_summary_csv
 
@@ -84,7 +83,7 @@ def run_scenario(
     resolved_runs: list[ResolvedDatasetRun],
     *,
     conn: Optional[ConnOpts],
-    statement_timeout_ms: int,
+    run_session_gucs: tuple[tuple[str, Any], ...],
     tag: str,
     reuse_stats: bool = False,
 ) -> None:
@@ -97,12 +96,10 @@ def run_scenario(
     query-execution errors after writing the current artifacts.
     """
 
-    if statement_timeout_ms < 0:
-        die(f"statement timeout must be >= 0 (got {statement_timeout_ms})")
     stats_refresh = "reuse_existing" if reuse_stats else "before_run"
 
     # Stage 1: create the output directory and verify that the target PostgreSQL
-    # server can run the selected scenario/variant GUCs.
+    # server can run the shared and selected variant GUCs.
     run_id = f"{utc_now().strftime('%Y%m%d_%H%M%S_%f')}_{safe_artifact_name(scenario.name)}"
     OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
     out_dir = OUTPUTS_DIR / run_id
@@ -110,7 +107,7 @@ def run_scenario(
 
     dbs = sorted({entry.db for entry in resolved_runs})
     ensure_databases_reachable(dbs, conn)
-    validate_required_gucs(dbs[0], conn, scenario, variants_registry, variant_names)
+    validate_session_gucs(dbs[0], conn, run_session_gucs, variants_registry, variant_names)
     # Snapshot the variant GUCs that will be SET for this run.
     effective_variant_contexts = [
         {
@@ -148,7 +145,7 @@ def run_scenario(
             resolved_runs=resolved_runs,
             state=state,
             tag=tag,
-            statement_timeout_ms=statement_timeout_ms,
+            run_session_gucs=run_session_gucs,
             effective_variant_contexts=effective_variant_contexts,
             dataset_contexts=dataset_contexts,
             stats_refresh=stats_refresh,
@@ -159,11 +156,10 @@ def run_scenario(
     # Stage 5: execute warmup and measured groups, flushing artifacts after
     # every group so partial runs remain inspectable.
     execute_prepared_work(
-        scenario=scenario,
         prepared_runs=prepared_runs,
         state=state,
         conn=conn,
-        statement_timeout_ms=statement_timeout_ms,
+        run_session_gucs=run_session_gucs,
         write_current_artifacts=write_current_artifacts,
     )
 
@@ -235,11 +231,10 @@ def prepare_dataset_work(
 
 def execute_prepared_work(
     *,
-    scenario: Scenario,
     prepared_runs: list[PreparedRunWork],
     state: RunState,
     conn: Optional[ConnOpts],
-    statement_timeout_ms: int,
+    run_session_gucs: tuple[tuple[str, Any], ...],
     write_current_artifacts: Callable[[], None],
 ) -> None:
     """Run every prepared query group and flush artifacts after each group."""
@@ -250,7 +245,6 @@ def execute_prepared_work(
         for query_idx, (query, stmt) in enumerate(prepared.query_statements):
             for warmup_pass in range(1, WARMUP_RUNS + 1):
                 state.termination = execute_warmup_group(
-                    scenario=scenario,
                     spec=prepared.spec,
                     query=query,
                     stmt=stmt,
@@ -258,7 +252,7 @@ def execute_prepared_work(
                     warmup_pass=warmup_pass,
                     selected_variants=prepared.selected_variants,
                     conn=conn,
-                    statement_timeout_ms=statement_timeout_ms,
+                    run_session_gucs=run_session_gucs,
                     warmup_failures=state.warmup_failures,
                     warmup_timeout_keys=state.warmup_timeout_keys,
                 )
@@ -268,7 +262,6 @@ def execute_prepared_work(
 
             for rep in range(1, MEASURED_REPS + 1):
                 state.termination = execute_measured_group(
-                    scenario=scenario,
                     spec=prepared.spec,
                     query=query,
                     stmt=stmt,
@@ -276,7 +269,7 @@ def execute_prepared_work(
                     rep=rep,
                     selected_variants=prepared.selected_variants,
                     conn=conn,
-                    statement_timeout_ms=statement_timeout_ms,
+                    run_session_gucs=run_session_gucs,
                     warmup_timeout_keys=state.warmup_timeout_keys,
                     raw_rows=state.raw_rows,
                     summary_acc=state.summary_acc,
@@ -288,7 +281,6 @@ def execute_prepared_work(
 
 def execute_warmup_group(
     *,
-    scenario: Scenario,
     spec: ResolvedDatasetRun,
     query: QueryMeta,
     stmt: str,
@@ -296,7 +288,7 @@ def execute_warmup_group(
     warmup_pass: int,
     selected_variants: list[Variant],
     conn: Optional[ConnOpts],
-    statement_timeout_ms: int,
+    run_session_gucs: tuple[tuple[str, Any], ...],
     warmup_failures: list[dict[str, Any]],
     warmup_timeout_keys: set[tuple[str, str, str]],
 ) -> Optional[dict[str, Any]]:
@@ -314,11 +306,10 @@ def execute_warmup_group(
         try:
             run_one_statement(
                 spec.db,
-                scenario.session_gucs,
+                run_session_gucs,
                 variant,
                 stmt,
                 conn=conn,
-                statement_timeout_ms=statement_timeout_ms,
             )
         except StatementTimeoutError as e:
             # Timeout is a valid benchmark outcome; measured reps will record skipped rows.
@@ -358,7 +349,6 @@ def execute_warmup_group(
 
 def execute_measured_group(
     *,
-    scenario: Scenario,
     spec: ResolvedDatasetRun,
     query: QueryMeta,
     stmt: str,
@@ -366,7 +356,7 @@ def execute_measured_group(
     rep: int,
     selected_variants: list[Variant],
     conn: Optional[ConnOpts],
-    statement_timeout_ms: int,
+    run_session_gucs: tuple[tuple[str, Any], ...],
     warmup_timeout_keys: set[tuple[str, str, str]],
     raw_rows: list[dict[str, str]],
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]],
@@ -399,11 +389,10 @@ def execute_measured_group(
             try:
                 metrics = run_one_statement(
                     spec.db,
-                    scenario.session_gucs,
+                    run_session_gucs,
                     variant,
                     stmt,
                     conn=conn,
-                    statement_timeout_ms=statement_timeout_ms,
                 )
                 planning_ms = metrics.planning_ms
                 total_ms = metrics.total_ms
@@ -585,7 +574,7 @@ def flush_outputs(
     resolved_runs: list[ResolvedDatasetRun],
     state: RunState,
     tag: str,
-    statement_timeout_ms: int,
+    run_session_gucs: tuple[tuple[str, Any], ...],
     effective_variant_contexts: list[dict[str, Any]],
     dataset_contexts: list[dict[str, Any]],
     stats_refresh: str,
@@ -607,7 +596,7 @@ def flush_outputs(
         run_id=run_id,
         scenario=scenario,
         tag=tag,
-        statement_timeout_ms=statement_timeout_ms,
+        run_session_gucs=run_session_gucs,
         measured_reps=MEASURED_REPS,
         warmup_runs=WARMUP_RUNS,
         effective_variant_contexts=effective_variant_contexts,

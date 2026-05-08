@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from bench_workloads import dataset_prepare_scripts, resolve_prepare_dataset_runs
+from bench_config import dataset_prepare_scripts, resolve_prepare_dataset_runs
 from bench_common import ConnOpts, Scenario, die, psql_file, psql_sql, sql_identifier, sql_literal
 
 

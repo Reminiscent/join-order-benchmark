@@ -4,7 +4,8 @@ import io
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,9 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bench"))
 
 from bench_common import QueryMeta, ResolvedDatasetRun, Scenario
-import bench_workloads
+import bench_config
 import bench
-from bench_workloads import (
+from bench_config import (
+    load_run_settings,
     load_scenarios,
     load_variants,
     resolve_dataset_runs,
@@ -24,14 +26,12 @@ from bench_workloads import (
 )
 
 
-class BenchWorkloadsTests(unittest.TestCase):
+class BenchConfigTests(unittest.TestCase):
     def make_scenario(self) -> Scenario:
         return Scenario(
             name="planning",
             description="test scenario",
             default_variants=("dp", "geqo"),
-            statement_timeout_ms=1000,
-            session_gucs=(),
             datasets=("gpuqo_clique_small", "sqlite_select5"),
         )
 
@@ -45,7 +45,7 @@ class BenchWorkloadsTests(unittest.TestCase):
     def test_load_variants_uses_built_ins_when_default_extra_file_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             missing_path = Path(tmpdir) / "missing.toml"
-            with patch.object(bench_workloads, "DEFAULT_VARIANTS_FILE", missing_path):
+            with patch.object(bench_config, "DEFAULT_VARIANTS_FILE", missing_path):
                 variants = load_variants()
 
         self.assertEqual(tuple(variants), ("dp", "geqo"))
@@ -106,6 +106,88 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
 
         self.assertEqual(tuple(variants), ("dp", "geqo", "my_algo"))
         self.assertEqual(variants["my_algo"].label, "My Algorithm")
+
+    def test_load_variants_rejects_non_scalar_guc_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "variants.toml"
+            path.write_text(
+                """
+[[variant]]
+name = "bad"
+session_gucs = { work_mem = ["1GB"] }
+"""
+            )
+
+            with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                load_variants(path)
+
+    def test_load_run_settings_reads_session_gucs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "benchmark_settings.toml"
+            path.write_text(
+                """
+statement_timeout = 1234
+join_collapse_limit = 100
+work_mem = "1GB"
+"""
+            )
+
+            with patch.object(bench_config, "DEFAULT_SETTINGS_FILE", path):
+                session_gucs = load_run_settings()
+
+        self.assertEqual(
+            session_gucs,
+            (
+                ("statement_timeout", 1234),
+                ("join_collapse_limit", 100),
+                ("work_mem", "1GB"),
+            ),
+        )
+
+    def test_load_run_settings_requires_at_least_one_setting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "benchmark_settings.toml"
+            path.write_text("")
+
+            with (
+                patch.object(bench_config, "DEFAULT_SETTINGS_FILE", path),
+                redirect_stderr(StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                load_run_settings()
+
+    def test_load_run_settings_rejects_table_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "benchmark_settings.toml"
+            path.write_text(
+                """
+[nested]
+value = 1000
+"""
+            )
+
+            with (
+                patch.object(bench_config, "DEFAULT_SETTINGS_FILE", path),
+                redirect_stderr(StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                load_run_settings()
+
+    def test_load_run_settings_rejects_empty_guc_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "benchmark_settings.toml"
+            path.write_text(
+                """
+"" = "bad"
+"""
+            )
+
+            with (
+                patch.object(bench_config, "DEFAULT_SETTINGS_FILE", path),
+                redirect_stderr(StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                load_run_settings()
 
     def test_prepare_dataset_resolution_uses_scenario_datasets(self) -> None:
         resolved = resolve_prepare_dataset_runs(self.make_scenario())
@@ -168,7 +250,7 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
             variants=("dp",),
         )
 
-        with patch.object(bench_workloads, "parse_manifest", return_value=queries):
+        with patch.object(bench_config, "parse_manifest", return_value=queries):
             selected = select_queries(spec)
 
         self.assertEqual([q.query_id for q in selected], ["q12", "q14", "q16"])

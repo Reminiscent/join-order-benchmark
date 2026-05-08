@@ -1,8 +1,8 @@
-"""Benchmark workload definitions and resolution helpers.
+"""Benchmark configuration definitions and resolution helpers.
 
-This module owns the built-in scenarios, variants, dataset mappings, query
-manifest access, and SQL wrapping rules.  ``bench.py`` uses it to turn CLI
-choices into concrete prepare/run work before handing execution to
+This module owns the built-in scenarios, variants, shared session GUCs, dataset
+mappings, query manifest access, and SQL wrapping rules.  ``bench.py`` uses it
+to turn CLI choices into concrete prepare/run work before handing execution to
 ``bench_prepare.py`` or ``bench_run.py``.
 """
 
@@ -12,7 +12,7 @@ import csv
 import functools
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 try:
     import tomllib
@@ -44,16 +44,11 @@ DEFAULT_DB_BY_DATASET = {
     "gpuqo_snowflake_small": "gpuqo_snowflake_small_bench",
 }
 
+DEFAULT_SETTINGS_FILE = REPO_ROOT / "examples" / "benchmark_settings.toml"
 DEFAULT_VARIANTS_FILE = REPO_ROOT / "examples" / "variants.toml"
+SCALAR_SETTING_TYPES = (str, int, float, bool)
 
 DEFAULT_SCENARIO_VARIANTS = ("dp", "geqo")
-DEFAULT_STATEMENT_TIMEOUT_MS = 600000
-DEFAULT_SESSION_GUCS = (
-    ("join_collapse_limit", 100),
-    ("max_parallel_workers_per_gather", 0),
-    ("work_mem", "1GB"),
-    ("effective_cache_size", "8GB"),
-)
 BUILT_IN_VARIANTS = (
     Variant(
         name="dp",
@@ -85,8 +80,9 @@ PLANNING_DATASETS = (
 )
 
 
-# Scenario and variant configuration.
-# This section defines the public benchmark modes and resolves algorithm choices.
+# Scenario registry.
+# The CLI exposes only these built-in scenarios; each starts from the same
+# portable baseline variants unless the user passes --variants.
 
 def built_in_scenario(
     *,
@@ -94,16 +90,42 @@ def built_in_scenario(
     description: str,
     datasets: tuple[str, ...],
 ) -> Scenario:
-    """Create a built-in scenario with the repository-wide default run settings."""
+    """Create a built-in scenario with repository-wide default variants."""
 
     return Scenario(
         name=name,
         description=description,
         default_variants=DEFAULT_SCENARIO_VARIANTS,
-        statement_timeout_ms=DEFAULT_STATEMENT_TIMEOUT_MS,
-        session_gucs=DEFAULT_SESSION_GUCS,
         datasets=datasets,
     )
+
+
+def load_scenarios() -> dict[str, Scenario]:
+    """Return the public scenario registry used by the CLI."""
+
+    scenarios = (
+        built_in_scenario(
+            name="main",
+            description="Primary algorithm validation path on complete JOB and JOB-Complex.",
+            datasets=MAIN_DATASETS,
+        ),
+        built_in_scenario(
+            name="extended",
+            description="Main validation plus the heavier CEB IMDB 3k workload.",
+            datasets=MAIN_DATASETS + CEB_DATASETS,
+        ),
+        built_in_scenario(
+            name="planning",
+            description="Self-contained synthetic workloads for planning/search-space stress.",
+            datasets=PLANNING_DATASETS,
+        ),
+    )
+    return {scenario.name: scenario for scenario in scenarios}
+
+
+# File-backed configuration.
+# These helpers load editable TOML files from examples/, plus the optional
+# explicit variant-file override.
 
 
 def resolve_variants_file(path: Optional[Path] = None) -> Optional[Path]:
@@ -147,101 +169,50 @@ def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
         out[name] = Variant(
             name=name,
             label=label,
-            session_gucs=tuple((str(k), v) for k, v in raw_gucs.items()),
+            session_gucs=parse_guc_mapping(
+                raw_gucs,
+                variants_path,
+                context=f"variant '{name}' session_gucs",
+            ),
         )
     return out
 
 
-def load_scenarios() -> dict[str, Scenario]:
-    """Return the public scenario registry used by the CLI."""
+def load_run_settings() -> tuple[tuple[str, Any], ...]:
+    """Load shared session GUCs from examples/benchmark_settings.toml."""
 
-    scenarios = (
-        built_in_scenario(
-            name="main",
-            description="Primary algorithm validation path on complete JOB and JOB-Complex.",
-            datasets=MAIN_DATASETS,
-        ),
-        built_in_scenario(
-            name="extended",
-            description="Main validation plus the heavier CEB IMDB 3k workload.",
-            datasets=MAIN_DATASETS + CEB_DATASETS,
-        ),
-        built_in_scenario(
-            name="planning",
-            description="Self-contained synthetic workloads for planning/search-space stress.",
-            datasets=PLANNING_DATASETS,
-        ),
-    )
-    return {scenario.name: scenario for scenario in scenarios}
+    settings_path = DEFAULT_SETTINGS_FILE
+    if not settings_path.is_file():
+        die(f"missing benchmark settings file: {settings_path}")
+
+    data = tomllib.loads(settings_path.read_text())
+    if not data:
+        die(f"{settings_path} must define at least one benchmark setting")
+    return parse_guc_mapping(data, settings_path, context="benchmark settings")
 
 
-def resolve_variant_names(
-    scenario: Scenario,
-    variants: dict[str, Variant],
-    override_csv: Optional[str],
-) -> tuple[str, ...]:
-    """Resolve the effective variant order for a scenario run."""
+def parse_guc_mapping(
+    raw_gucs: dict[str, Any],
+    source_path: Path,
+    *,
+    context: str,
+) -> tuple[tuple[str, Any], ...]:
+    """Parse TOML key/value pairs into validated session GUC assignments."""
 
-    names = tuple(parse_csv_list(override_csv)) if override_csv else scenario.default_variants
-    if not names:
-        die(f"scenario '{scenario.name}' does not define default_variants and no --variants were provided")
-    for name in names:
-        if name not in variants:
-            die(f"unknown variant '{name}' (see: python3 bench/bench.py list variants)")
-    return names
-
-
-# Prepare/run workload resolution.
-# This section turns a selected scenario into concrete work for prepare or run.
-
-def resolve_dataset_runs(
-    scenario: Scenario,
-    variant_names: tuple[str, ...],
-    min_join: Optional[int] = None,
-) -> list[ResolvedDatasetRun]:
-    """Expand a scenario into concrete dataset/database/variant run specs."""
-
-    resolved: list[ResolvedDatasetRun] = []
-
-    for dataset in scenario.datasets:
-        resolved.append(
-            ResolvedDatasetRun(
-                dataset=dataset,
-                db=dataset_db_name(dataset),
-                variants=variant_names,
-                min_join=min_join,
-            )
-        )
-
-    if not resolved:
-        die(f"scenario '{scenario.name}' resolved to zero dataset runs with the selected variants")
-    return resolved
+    gucs: list[tuple[str, Any]] = []
+    for raw_name, value in raw_gucs.items():
+        name = str(raw_name).strip()
+        if not name:
+            die(f"{source_path} contains an empty GUC name in {context}")
+        if not isinstance(value, SCALAR_SETTING_TYPES):
+            die(f"{source_path} setting '{name}' in {context} must be a scalar GUC value")
+        gucs.append((name, value))
+    return tuple(gucs)
 
 
-def resolve_prepare_dataset_runs(
-    scenario: Scenario,
-) -> list[ResolvedDatasetRun]:
-    """Resolve scenario datasets that the prepare command recreates."""
-
-    known_datasets = set(available_datasets())
-    datasets = list(dict.fromkeys(scenario.datasets))
-
-    resolved: list[ResolvedDatasetRun] = []
-    for dataset in datasets:
-        if dataset not in known_datasets:
-            die(f"unknown dataset '{dataset}' (see: python3 bench/bench.py list datasets)")
-        resolved.append(
-            ResolvedDatasetRun(
-                dataset=dataset,
-                db=dataset_db_name(dataset),
-                variants=(),
-            )
-        )
-    return resolved
-
-
-# Query manifest access.
+# Query manifest and selection.
 # This section reads checked-in query metadata and applies query filters.
+
 
 @functools.lru_cache(maxsize=1)
 def load_manifest_by_dataset() -> dict[str, tuple[QueryMeta, ...]]:
@@ -302,8 +273,82 @@ def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
     return queries
 
 
-# SQL file loading.
-# This section loads the SQL text referenced by manifest entries.
+# Run specification resolution.
+# These helpers turn selected scenario/variant choices into concrete work.
+
+
+def resolve_variant_names(
+    scenario: Scenario,
+    variants: dict[str, Variant],
+    override_csv: Optional[str],
+) -> tuple[str, ...]:
+    """Resolve the effective variant order for a scenario run."""
+
+    names = tuple(parse_csv_list(override_csv)) if override_csv else scenario.default_variants
+    if not names:
+        die(f"scenario '{scenario.name}' does not define default_variants and no --variants were provided")
+    for name in names:
+        if name not in variants:
+            die(f"unknown variant '{name}' (see: python3 bench/bench.py list variants)")
+    return names
+
+
+def dataset_db_name(dataset: str) -> str:
+    """Return the default PostgreSQL database name for a dataset."""
+
+    if dataset not in DEFAULT_DB_BY_DATASET:
+        die(f"no default benchmark database configured for dataset '{dataset}'")
+    return DEFAULT_DB_BY_DATASET[dataset]
+
+
+def resolve_dataset_runs(
+    scenario: Scenario,
+    variant_names: tuple[str, ...],
+    min_join: Optional[int] = None,
+) -> list[ResolvedDatasetRun]:
+    """Expand a scenario into concrete dataset/database/variant run specs."""
+
+    resolved: list[ResolvedDatasetRun] = []
+
+    for dataset in scenario.datasets:
+        resolved.append(
+            ResolvedDatasetRun(
+                dataset=dataset,
+                db=dataset_db_name(dataset),
+                variants=variant_names,
+                min_join=min_join,
+            )
+        )
+
+    if not resolved:
+        die(f"scenario '{scenario.name}' resolved to zero dataset runs with the selected variants")
+    return resolved
+
+
+def resolve_prepare_dataset_runs(
+    scenario: Scenario,
+) -> list[ResolvedDatasetRun]:
+    """Resolve scenario datasets that the prepare command recreates."""
+
+    known_datasets = set(available_datasets())
+    datasets = list(dict.fromkeys(scenario.datasets))
+
+    resolved: list[ResolvedDatasetRun] = []
+    for dataset in datasets:
+        if dataset not in known_datasets:
+            die(f"unknown dataset '{dataset}' (see: python3 bench/bench.py list datasets)")
+        resolved.append(
+            ResolvedDatasetRun(
+                dataset=dataset,
+                db=dataset_db_name(dataset),
+                variants=(),
+            )
+        )
+    return resolved
+
+
+# SQL loading and statement shaping.
+# This section turns manifest entries into the SQL sent to EXPLAIN ANALYZE.
 
 
 def load_sql_for_query(query: QueryMeta) -> str:
@@ -314,9 +359,6 @@ def load_sql_for_query(query: QueryMeta) -> str:
         die(f"missing query file: {path}")
     return path.read_text(errors="ignore")
 
-
-# SQL statement shaping.
-# This section normalizes workload SQL into the statement sent to EXPLAIN ANALYZE.
 
 def strip_trailing_semicolon_and_comment(sql: str) -> str:
     """Remove a final semicolon and trailing SQL comment from a statement."""
@@ -344,15 +386,8 @@ def build_statement(dataset: str, sql: str) -> str:
     return ensure_semicolon(sql)
 
 
-# Dataset database and prepare-script mapping.
-# This section maps logical dataset names to databases and loader scripts.
-
-def dataset_db_name(dataset: str) -> str:
-    """Return the default PostgreSQL database name for a dataset."""
-
-    if dataset not in DEFAULT_DB_BY_DATASET:
-        die(f"no default benchmark database configured for dataset '{dataset}'")
-    return DEFAULT_DB_BY_DATASET[dataset]
+# Prepare script mapping.
+# This section maps logical dataset names to loader scripts.
 
 
 def dataset_prepare_scripts(dataset: str) -> tuple[Path, Path, Optional[Path], bool]:

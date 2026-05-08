@@ -6,14 +6,12 @@ GUC validation, statistics refresh, and parsing of ``psql`` output.
 
 from __future__ import annotations
 
-import functools
 import json
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from bench_common import (
     ConnOpts,
-    Scenario,
     Variant,
     die,
     psql_cmd,
@@ -46,22 +44,21 @@ class StatementTimeoutError(RuntimeError):
 
 def run_one_statement(
     db: str,
-    scenario_session_gucs: tuple[tuple[str, Any], ...],
+    run_session_gucs: tuple[tuple[str, Any], ...],
     variant: Variant,
     stmt: str,
     *,
     conn: Optional[ConnOpts] = None,
-    statement_timeout_ms: int,
 ) -> RunMetrics:
     """Run one benchmark statement in a clean PostgreSQL session.
 
-    The generated script resets the session, applies the scenario GUCs, applies
-    the selected variant GUCs, and finally runs EXPLAIN JSON.  A PostgreSQL
+    The generated script resets the session, applies the shared run GUCs,
+    applies the selected variant GUCs, and finally runs EXPLAIN JSON.  A PostgreSQL
     statement_timeout is reported as ``StatementTimeoutError`` so the run
     driver can classify it separately from other execution errors.
     """
 
-    script_lines = [*build_session_prelude(scenario_session_gucs, variant, statement_timeout_ms)]
+    script_lines = [*build_session_prelude(run_session_gucs, variant)]
     script_lines.extend([explain_sql(stmt), ""])
 
     script = "\n".join(script_lines)
@@ -85,17 +82,21 @@ def run_one_statement(
 
 
 def build_session_prelude(
-    scenario_session_gucs: tuple[tuple[str, Any], ...],
+    run_session_gucs: tuple[tuple[str, Any], ...],
     variant: Variant,
-    statement_timeout_ms: int,
 ) -> list[str]:
     """Build the psql script prefix used before each EXPLAIN statement."""
 
     lines = ["RESET ALL;"]
-    lines.append(f"SET statement_timeout = {statement_timeout_ms};")
-    lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in scenario_session_gucs)
-    lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in variant.session_gucs)
+    lines.extend(set_guc_lines(run_session_gucs))
+    lines.extend(set_guc_lines(variant.session_gucs))
     return lines
+
+
+def set_guc_lines(gucs: tuple[tuple[str, Any], ...]) -> list[str]:
+    """Render session GUC assignments as psql script lines."""
+
+    return [f"SET {k} = {sql_literal(v)};" for k, v in gucs]
 
 
 def explain_sql(stmt: str) -> str:
@@ -189,61 +190,46 @@ def ensure_databases_reachable(dbs: list[str], conn: Optional[ConnOpts] = None) 
         )
 
 
-def validate_required_gucs(
+def validate_session_gucs(
     db: str,
     conn: Optional[ConnOpts],
-    scenario: Scenario,
+    run_session_gucs: tuple[tuple[str, Any], ...],
     variants_registry: dict[str, Variant],
     variant_names: tuple[str, ...],
 ) -> None:
-    """Verify that mandatory scenario and variant GUCs exist on the server."""
+    """Fail before measurement if configured shared or variant GUCs are invalid."""
 
-    missing_scenario = [
-        name for name, _ in scenario.session_gucs if not guc_exists(db, conn, name)
-    ]
-    if missing_scenario:
-        die(
-            f"scenario '{scenario.name}' requires unsupported PostgreSQL parameter(s): "
-            f"{', '.join(sorted(missing_scenario))}"
-        )
-
-    missing_by_variant: list[str] = []
+    validate_guc_assignments(db, conn, "benchmark settings", run_session_gucs)
     for variant_name in variant_names:
-        variant = variants_registry[variant_name]
-        missing = [
-            name
-            for name, _ in variant.session_gucs
-            if not guc_exists(db, conn, name)
-        ]
-        if missing:
-            missing_by_variant.append(f"{variant_name}: {', '.join(sorted(missing))}")
-
-    if missing_by_variant:
-        die(
-            "selected variant(s) require unsupported PostgreSQL parameter(s): "
-            + " | ".join(missing_by_variant)
+        validate_guc_assignments(
+            db,
+            conn,
+            f"variant '{variant_name}'",
+            variants_registry[variant_name].session_gucs,
         )
 
 
-# PostgreSQL GUC lookup.
+def validate_guc_assignments(
+    db: str,
+    conn: Optional[ConnOpts],
+    source: str,
+    gucs: tuple[tuple[str, Any], ...],
+) -> None:
+    """Fail before measurement if PostgreSQL rejects a configured SET value."""
 
+    if not gucs:
+        return
 
-def current_setting(db: str, name: str, conn: Optional[ConnOpts] = None) -> Optional[str]:
-    """Return a PostgreSQL setting value, or None when the setting is absent."""
+    script = "\n".join(["RESET ALL;", *set_guc_lines(gucs), ""])
+    p = psql_sql_raw(db, script, conn=conn, check=False)
+    if p.returncode == 0:
+        return
 
-    sql = f"SELECT current_setting({sql_literal(name)}, true);\n"
-    p = run_cmd(psql_cmd(db, conn) + ["-At"], input_text=sql, check=False)
-    if p.returncode != 0:
-        return None
-    value = (p.stdout or "").strip()
-    return value or None
-
-
-@functools.lru_cache(maxsize=None)
-def guc_exists(db: str, conn: Optional[ConnOpts], name: str) -> bool:
-    """Return whether the server recognizes a GUC name."""
-
-    return current_setting(db, name, conn) is not None
+    out = (p.stdout or "") + (p.stderr or "")
+    die(
+        f"invalid PostgreSQL setting assignment(s) in {source}: "
+        f"{first_error_line(out) or 'SET failed'}"
+    )
 
 
 # psql error classification.

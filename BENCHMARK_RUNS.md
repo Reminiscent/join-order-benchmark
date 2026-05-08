@@ -44,7 +44,7 @@ Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 `bench.py run <scenario>` performs the measured benchmark run:
 
 1. Resolve the scenario, datasets, variants, and min-join filters.
-2. Check that benchmark databases are reachable and required GUCs exist.
+2. Check that benchmark databases are reachable and configured GUCs are valid.
 3. Select and load the exact query SQL for each dataset.
 4. Unless `--reuse-stats` is passed, stabilize each distinct target database
    with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.  Datasets that
@@ -69,14 +69,14 @@ These values define the public benchmark protocol:
   pass order uses the same rotation rule.
 - By default, each run refreshes table statistics once per distinct database
   before any query runs.
-- `statement_timeout` defaults to `600000 ms`.
+- Shared session GUCs from `examples/benchmark_settings.toml` are applied before
+  variant GUCs for every warmup and measured statement.
 - Non-timeout warmup or measured errors terminate the run after current
   artifacts are written.
 
 Measured repetitions, warmup count, and variant order are fixed by the runner.
 Use `--reuse-stats` only when comparing separate runs that should share the same
-existing statistics snapshot.  `--statement-timeout-ms` only changes the
-guardrail timeout; it is not an algorithm knob.
+existing statistics snapshot.
 
 ## PostgreSQL Settings
 
@@ -87,24 +87,30 @@ outside the harness and restart PostgreSQL:
 ALTER SYSTEM SET shared_buffers = '4GB';
 ```
 
-Each warmup and measured execution starts from a fresh session prelude:
+The default shared per-statement settings are:
 
-```sql
-RESET ALL;
-SET statement_timeout = 600000;
-SET join_collapse_limit = 100;
-SET max_parallel_workers_per_gather = 0;
-SET work_mem = '1GB';
-SET effective_cache_size = '8GB';
--- followed by variant-specific SET commands
+```toml
+statement_timeout = 600000
+join_collapse_limit = 100
+max_parallel_workers_per_gather = 0
+work_mem = "1GB"
+effective_cache_size = "8GB"
 ```
 
-Variant settings are applied after the scenario settings, and every configured
-variant GUC must exist on the target server.  The harness emits these session
-settings before every warmup and measured SQL because each statement runs in
-its own `psql` session.  It does not change restart-required cluster settings.
-Patched builds should keep new planner algorithms disabled by default; enable
-them explicitly through variant `session_gucs`.
+Shared session settings define the common per-statement environment for every
+variant.  The defaults bound runaway statements, keep large joins inside the
+intended optimizer search path, disable parallel-plan noise, and align memory
+assumptions with the 16 GiB baseline.  Keeping these settings shared makes
+algorithm comparisons differ by variant GUCs instead of accidental run-protocol
+differences.
+
+Each warmup and measured execution starts from `RESET ALL`, then applies shared
+settings from [examples/benchmark_settings.toml](examples/benchmark_settings.toml),
+then applies variant-specific settings.  Every configured GUC must accept its
+value before statistics are refreshed or measured SQL is executed.  The harness
+does not change restart-required cluster settings.
+Patched builds should keep new planner algorithms disabled by default; enable or
+tune them explicitly through variant `session_gucs`.
 
 ## Timing Collection
 

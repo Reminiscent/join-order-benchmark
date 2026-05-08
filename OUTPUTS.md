@@ -70,7 +70,7 @@ Important fields:
 | `run_id` | Output directory id. |
 | `scenario` | Scenario name, such as `main`, `extended`, or `planning`. |
 | `scenario_description` | Description from the built-in scenario definition. |
-| `statement_timeout_ms` | Per-statement guardrail timeout used during measurement. |
+| `session_gucs` | Shared session GUCs applied before every variant. |
 | `protocol` | Measured reps, warmup runs, timing mode, variant order, and stats refresh rule used by the run. |
 | `variants` | Resolved variant names, labels, and session GUCs used in this run. |
 | `datasets` | Resolved dataset entries, the min-join filter, and the variants actually run for each entry. |
@@ -79,7 +79,7 @@ Important fields:
 | `termination` | Fatal termination record, if the run stopped early. |
 
 Use `run.json` when a reviewer needs to check which scenario, variants,
-datasets, adjustable timeout, and core execution protocol produced a result
+datasets, benchmark settings, and core execution protocol produced a result
 table.  The full protocol rationale is documented in
 [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).
 

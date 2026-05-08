@@ -11,11 +11,12 @@ import argparse
 from pathlib import Path
 
 from bench_common import ConnOpts, REPO_ROOT, Scenario, Variant, die
-from bench_workloads import (
+from bench_config import (
     BUILT_IN_VARIANTS,
     DEFAULT_VARIANTS_FILE,
     available_datasets,
     dataset_db_name,
+    load_run_settings,
     load_scenarios,
     load_variants,
     resolve_dataset_runs,
@@ -66,9 +67,10 @@ def main() -> None:
         return
 
     if args.cmd == "run":
-        # The run path resolves optional CLI overrides before handing execution
+        # The run path resolves CLI choices before handing execution
         # to bench_run.py, which owns SQL execution and artifact writing.
         variants = load_variants(args.variants_file)
+        run_session_gucs = load_run_settings()
         variant_names = resolve_variant_names(scenario, variants, args.variants)
         resolved_runs = resolve_dataset_runs(
             scenario,
@@ -81,11 +83,7 @@ def main() -> None:
             variant_names,
             resolved_runs,
             conn=conn,
-            statement_timeout_ms=(
-                args.statement_timeout_ms
-                if args.statement_timeout_ms is not None
-                else scenario.statement_timeout_ms
-            ),
+            run_session_gucs=run_session_gucs,
             tag=args.tag,
             reuse_stats=args.reuse_stats,
         )
@@ -134,12 +132,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="reuse existing database statistics instead of running VACUUM FREEZE ANALYZE and CHECKPOINT",
     )
     add_variant_file_arg(ap_run)
-    ap_run.add_argument(
-        "--statement-timeout-ms",
-        type=int,
-        default=None,
-        help="override the per-statement guardrail timeout in milliseconds",
-    )
     ap_run.add_argument("--tag", default="", help="optional local tag for this run or the build under test")
     add_conn_args(ap_run)
 

@@ -10,7 +10,7 @@ the public benchmark protocol; use this file as the code map.
 | --- | --- |
 | [bench.py](bench.py) | CLI entry point for `list`, `prepare`, and `run`. |
 | [bench_common.py](bench_common.py) | Cross-module records, repository paths, SQL quoting, subprocess, and `psql` helpers.  It should stay free of workload-specific policy. |
-| [bench_workloads.py](bench_workloads.py) | Scenario, variant, dataset, query-manifest, and SQL-wrapping rules.  This is workload semantics, not PostgreSQL execution. |
+| [bench_config.py](bench_config.py) | Scenario, variant, shared run settings, dataset, query-manifest, and SQL-wrapping rules.  This is benchmark configuration, not PostgreSQL execution. |
 | [bench_prepare.py](bench_prepare.py) | Database recreation and dataset loading for `bench.py prepare`. |
 | [bench_run.py](bench_run.py) | Run orchestration: output directory setup, database/GUC checks, statistics stabilization, warmup/measured groups, and artifact flushes. |
 | [bench_exec.py](bench_exec.py) | One PostgreSQL statement execution path: session prelude, `EXPLAIN ANALYZE` JSON, timing/cost parsing, and `statement_timeout` classification. |
@@ -24,7 +24,7 @@ the public benchmark protocol; use this file as the code map.
 ```text
 bench.py prepare
     -> resolve scenario datasets and target databases
-       [bench_workloads.py]
+       [bench_config.py]
     -> recreate each distinct database and run schema/load/index SQL
        [bench_prepare.py]
     -> prepared PostgreSQL databases
@@ -34,12 +34,12 @@ bench.py prepare
 
 ```text
 bench.py run
-    -> resolve scenario, variants, datasets, databases, and min-join filter
-       [bench_workloads.py]
+    -> resolve benchmark settings, scenario, variants, datasets, and min-join filter
+       [bench_config.py]
     -> create outputs/<run_id> and validate databases/GUCs
        [bench_run.py, bench_exec.py]
     -> select, load, and wrap SQL for each dataset/query group
-       [bench_run.py, bench_workloads.py]
+       [bench_run.py, bench_config.py]
     -> stabilize stats unless the run reuses existing statistics
        [bench_run.py, bench_exec.py]
     -> for each dataset/query/variant group:

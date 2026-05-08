@@ -46,13 +46,11 @@ class Variant:
 
 @dataclass(frozen=True)
 class Scenario:
-    """A public benchmark scenario and its default execution settings."""
+    """A public benchmark scenario and its default variant selection."""
 
     name: str
     description: str
     default_variants: tuple[str, ...]
-    statement_timeout_ms: int
-    session_gucs: tuple[tuple[str, Any], ...]
     datasets: tuple[str, ...]
 
 

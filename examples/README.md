@@ -5,10 +5,24 @@ The portable `dp` and `geqo` baseline variants are built into `bench.py`.
 additional algorithms or alternate parameter settings, such as GOO or hybrid
 search settings.
 
-The built-in scenarios default to the portable baselines.  The CLI automatically
-loads `examples/variants.toml` when this file exists, so pass `--variants-file`
-only when using a different TOML file.  To change the default extra variants,
-edit `examples/variants.toml` directly.
+The built-in scenarios default to the portable baselines.  The CLI loads
+`examples/variants.toml` when this file exists.  To change the default extra
+variants, edit `examples/variants.toml` directly.
+
+`benchmark_settings.toml` is the shared run-settings file.  Each top-level entry
+is a session GUC applied to every variant, before variant-specific GUCs.  Use it
+for run-protocol settings that should stay identical across algorithm
+comparisons.
+
+Default shared settings:
+
+```toml
+statement_timeout = 600000
+join_collapse_limit = 100
+max_parallel_workers_per_gather = 0
+work_mem = "1GB"
+effective_cache_size = "8GB"
+```
 
 Use the default extra variants with:
 
@@ -29,3 +43,4 @@ Each `[[variant]]` entry supports:
 
 Patched builds should keep new algorithm switches disabled by default.  Enable
 or tune them explicitly in `session_gucs` for the variants that need them.
+Do not put algorithm-specific switches in `benchmark_settings.toml`.

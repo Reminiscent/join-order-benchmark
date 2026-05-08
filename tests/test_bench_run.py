@@ -5,8 +5,9 @@ import json
 import sys
 import tempfile
 import unittest
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stderr
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -38,10 +39,11 @@ class RunScenarioTests(unittest.TestCase):
             name="main",
             description="test scenario",
             default_variants=("dp",),
-            statement_timeout_ms=1000,
-            session_gucs=(),
             datasets=(),
         )
+
+    def make_run_session_gucs(self) -> tuple[tuple[str, object], ...]:
+        return (("statement_timeout", 1000), ("work_mem", "1GB"))
 
     def make_variant_registry(self) -> dict[str, Variant]:
         return {"dp": Variant(name="dp", label="dp", session_gucs=())}
@@ -86,7 +88,7 @@ class RunScenarioTests(unittest.TestCase):
         stack.enter_context(patch.object(bench_run, "MEASURED_REPS", measured_reps))
         stack.enter_context(patch.object(bench_run, "WARMUP_RUNS", warmup_runs))
         stack.enter_context(patch.object(bench_run, "ensure_databases_reachable", Mock()))
-        stack.enter_context(patch.object(bench_run, "validate_required_gucs", Mock()))
+        stack.enter_context(patch.object(bench_run, "validate_session_gucs", Mock()))
         stabilize_mock = Mock()
         stack.enter_context(patch.object(bench_run, "stabilize_db", stabilize_mock))
         stack.enter_context(
@@ -148,7 +150,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                statement_timeout_ms=1000,
+                run_session_gucs=self.make_run_session_gucs(),
                 tag="",
             )
 
@@ -184,7 +186,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                statement_timeout_ms=1000,
+                run_session_gucs=self.make_run_session_gucs(),
                 tag="",
             )
 
@@ -211,7 +213,7 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp",),
                     self.make_resolved_runs(),
                     conn=None,
-                    statement_timeout_ms=1000,
+                    run_session_gucs=self.make_run_session_gucs(),
                     tag="",
                 )
 
@@ -240,7 +242,7 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp",),
                     self.make_resolved_runs(),
                     conn=None,
-                    statement_timeout_ms=1000,
+                    run_session_gucs=self.make_run_session_gucs(),
                     tag="",
                 )
 
@@ -288,7 +290,7 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp", "geqo"),
                     resolved_runs,
                     conn=None,
-                    statement_timeout_ms=1000,
+                    run_session_gucs=self.make_run_session_gucs(),
                     tag="",
                 )
 
@@ -321,7 +323,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                statement_timeout_ms=1000,
+                run_session_gucs=self.make_run_session_gucs(),
                 tag="",
             )
 
@@ -337,7 +339,10 @@ class RunScenarioTests(unittest.TestCase):
                     for row in raw_rows
                 )
             )
-            self.assertEqual(run_context["statement_timeout_ms"], 1000)
+            self.assertEqual(
+                run_context["session_gucs"],
+                [{"statement_timeout": 1000}, {"work_mem": "1GB"}],
+            )
             self.assertEqual(
                 run_context["protocol"],
                 {
@@ -372,7 +377,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                statement_timeout_ms=1000,
+                run_session_gucs=self.make_run_session_gucs(),
                 tag="",
                 reuse_stats=True,
             )
@@ -408,7 +413,7 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp",),
                     self.make_resolved_runs(),
                     conn=None,
-                    statement_timeout_ms=1000,
+                    run_session_gucs=self.make_run_session_gucs(),
                     tag="",
                 )
 
@@ -441,14 +446,14 @@ class RunScenarioTests(unittest.TestCase):
                     ("dp",),
                     self.make_resolved_runs(),
                     conn=None,
-                    statement_timeout_ms=1000,
+                    run_session_gucs=self.make_run_session_gucs(),
                     tag="",
                 )
 
             stabilize_mock.assert_not_called()
 
-    def test_guc_validation_only_checks_selected_variants(self) -> None:
-        scenario = self.make_scenario()
+    def test_guc_validation_only_sets_selected_variants(self) -> None:
+        run_session_gucs = (("join_collapse_limit", 100),)
         variants = {
             "dp": Variant(name="dp", label="dp", session_gucs=(("geqo_threshold", 100),)),
             "unused": Variant(
@@ -457,13 +462,26 @@ class RunScenarioTests(unittest.TestCase):
                 session_gucs=(("missing_unused_guc", "on"),),
             ),
         }
+        psql_mock = Mock(return_value=Mock(returncode=0, stdout="", stderr=""))
+
+        with patch.object(bench_exec, "psql_sql_raw", psql_mock):
+            bench_exec.validate_session_gucs("bench_db", None, run_session_gucs, variants, ("dp",))
+
+        scripts = [call.args[1] for call in psql_mock.call_args_list]
+        self.assertTrue(any("SET geqo_threshold = 100;" in script for script in scripts))
+        self.assertFalse(any("missing_unused_guc" in script for script in scripts))
+
+    def test_guc_validation_rejects_invalid_setting_values(self) -> None:
+        run_session_gucs = (("work_mem", "not-a-size"),)
+        variants = {"dp": Variant(name="dp", label="dp", session_gucs=())}
 
         with patch.object(
             bench_exec,
-            "guc_exists",
-            Mock(side_effect=lambda _db, _conn, name: name != "missing_unused_guc"),
+            "psql_sql_raw",
+            Mock(return_value=Mock(returncode=1, stdout="", stderr="ERROR: invalid value")),
         ):
-            bench_exec.validate_required_gucs("bench_db", None, scenario, variants, ("dp",))
+            with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                bench_exec.validate_session_gucs("bench_db", None, run_session_gucs, variants, ("dp",))
 
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")
@@ -500,7 +518,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp",),
                 self.make_resolved_runs(),
                 conn=None,
-                statement_timeout_ms=1000,
+                run_session_gucs=self.make_run_session_gucs(),
                 tag="",
             )
 
@@ -563,7 +581,7 @@ class RunScenarioTests(unittest.TestCase):
                 ("dp", "geqo"),
                 resolved_runs,
                 conn=None,
-                statement_timeout_ms=1000,
+                run_session_gucs=self.make_run_session_gucs(),
                 tag="",
             )
 

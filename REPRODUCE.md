@@ -55,16 +55,16 @@ CEB IMDB 3k workload.  `planning` contains self-contained synthetic wide-join
 workloads for planning/search-space checks.
 Dataset details are in [WORKLOADS.md](WORKLOADS.md).
 
-## Variants
+## Configuration Files
 
-A variant is one named run configuration: a label plus the session GUCs needed
-to run it.  It can represent a different join-order algorithm, or the same
-algorithm with different parameters.  The portable baseline variants `dp` and
-`geqo` are built in.
+`examples/benchmark_settings.toml` defines shared PostgreSQL session GUCs used
+by every variant.  Keep run-protocol settings there when they should stay
+identical across algorithms or parameter sweeps.
 
-Define extra variants in `examples/variants.toml`.  The CLI loads that file by
-default when it exists.  Use `--variants-file` only to replace that default with
-another TOML file.
+`examples/variants.toml` defines extra variants.  A variant is one named run
+configuration: a label plus algorithm-specific session GUCs.  It can represent
+a different join-order algorithm, or the same algorithm with different
+parameters.  The portable baseline variants `dp` and `geqo` are built in.
 
 Inspect variants from a different file:
 
@@ -72,7 +72,9 @@ Inspect variants from a different file:
 python3 bench/bench.py list variants --variants-file path/to/variants.toml
 ```
 
-Variant fields are documented in [examples/README.md](examples/README.md).
+Both file formats and defaults are documented in
+[examples/README.md](examples/README.md).  The runner validates configured GUCs
+before refreshing statistics or executing measured SQL.
 
 ## Main Scenario
 
@@ -175,7 +177,6 @@ variants are selected.
 | `--variants-file` | use a different extra variant TOML file |
 | `--min-join` | run only queries with manifest `join_size >= N` |
 | `--reuse-stats` | reuse existing database statistics instead of refreshing them |
-| `--statement-timeout-ms` | adjust the per-statement guardrail timeout |
 | `--tag` | record a local build or patch label in `run.json` |
 
 Timeout handling is described in [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md).

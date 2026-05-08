@@ -1,0 +1,7 @@
+# Shared session GUCs applied before every variant.
+
+statement_timeout = 600000
+join_collapse_limit = 100
+max_parallel_workers_per_gather = 0
+work_mem = "1GB"
+effective_cache_size = "8GB"
