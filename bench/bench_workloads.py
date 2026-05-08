@@ -96,6 +96,9 @@ PLANNING_DATASETS = (
 )
 
 
+# Scenario and variant configuration.
+# This section defines the public benchmark modes and resolves algorithm choices.
+
 def built_in_scenario(
     *,
     name: str,
@@ -203,6 +206,9 @@ def resolve_variant_names(
     return names
 
 
+# Prepare/run workload resolution.
+# This section turns a selected scenario into concrete work for prepare or run.
+
 def resolve_dataset_runs(
     scenario: Scenario,
     variant_names: tuple[str, ...],
@@ -248,6 +254,9 @@ def resolve_prepare_dataset_runs(
         )
     return resolved
 
+
+# Query manifest access.
+# This section reads checked-in query metadata and applies query filters.
 
 @functools.lru_cache(maxsize=1)
 def load_manifest_by_dataset() -> dict[str, tuple[QueryMeta, ...]]:
@@ -295,6 +304,39 @@ def parse_manifest(dataset: str) -> list[QueryMeta]:
     return list(manifest[dataset])
 
 
+def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
+    """Select manifest queries for a run spec, applying any min_join filter."""
+
+    queries = parse_manifest(spec.dataset)
+    if spec.min_join is not None:
+        queries = [q for q in queries if q.join_size >= spec.min_join]
+    if not queries:
+        die(
+            f"no queries selected "
+            f"(dataset={spec.dataset}, min_join={spec.min_join})"
+        )
+    return queries
+
+
+# SQL file loading.
+# This section loads the SQL text referenced by manifest entries.
+
+
+def load_sql_for_query(query: QueryMeta) -> str:
+    """Load the SQL text for a manifest query entry."""
+
+    if query.dataset == "sqlite_select5":
+        sql = parse_select5_queries().get(query.query_id)
+        if sql is None:
+            die(f"missing sqlite_select5 query_id={query.query_id} in sqlite/queries/select5.sql")
+        return sql
+
+    path = REPO_ROOT / query.query_path
+    if not path.is_file():
+        die(f"missing query file: {path}")
+    return path.read_text(errors="ignore")
+
+
 @functools.lru_cache(maxsize=1)
 def parse_select5_queries() -> dict[str, str]:
     """Parse the combined sqlite select5 SQL file into query_id -> SQL text."""
@@ -333,6 +375,9 @@ def parse_select5_queries() -> dict[str, str]:
     return queries
 
 
+# SQL statement shaping.
+# This section normalizes workload SQL into the statement sent to EXPLAIN ANALYZE.
+
 def strip_trailing_semicolon_and_comment(sql: str) -> str:
     """Remove a final semicolon and trailing SQL comment from a statement."""
 
@@ -358,6 +403,9 @@ def build_statement(dataset: str, sql: str) -> str:
         return f"SELECT count(*) FROM ({inner}) q;"
     return ensure_semicolon(sql)
 
+
+# Dataset database and prepare-script mapping.
+# This section maps logical dataset names to databases and loader scripts.
 
 def dataset_db_name(dataset: str) -> str:
     """Return the default PostgreSQL database name for a dataset."""
@@ -392,32 +440,3 @@ def dataset_prepare_scripts(dataset: str) -> tuple[Path, Path, Optional[Path], b
         return (base / "schema.sql", base / "load.sql", None, False)
 
     die(f"dataset '{dataset}' is not supported by prepare")
-
-
-def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
-    """Select manifest queries for a run spec, applying any min_join filter."""
-
-    queries = parse_manifest(spec.dataset)
-    if spec.min_join is not None:
-        queries = [q for q in queries if q.join_size >= spec.min_join]
-    if not queries:
-        die(
-            f"no queries selected "
-            f"(dataset={spec.dataset}, min_join={spec.min_join})"
-        )
-    return queries
-
-
-def load_sql_for_query(query: QueryMeta) -> str:
-    """Load the SQL text for a manifest query entry."""
-
-    if query.dataset == "sqlite_select5":
-        sql = parse_select5_queries().get(query.query_id)
-        if sql is None:
-            die(f"missing sqlite_select5 query_id={query.query_id} in sqlite/queries/select5.sql")
-        return sql
-
-    path = REPO_ROOT / query.query_path
-    if not path.is_file():
-        die(f"missing query file: {path}")
-    return path.read_text(errors="ignore")
