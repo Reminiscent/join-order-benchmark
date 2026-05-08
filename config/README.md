@@ -1,13 +1,13 @@
-# Examples
+# Benchmark Configuration
 
-The portable `dp` and `geqo` baseline variants are built into `bench.py`.
-`variants.toml` is an example extra variant file.  Extra variants can represent
+The portable `dp` and `geqo` baseline variants are built into `bench_config.py`.
+`variants.toml` defines optional extra variants.  Extra variants can represent
 additional algorithms or alternate parameter settings, such as GOO or hybrid
 search settings.
 
-The built-in scenarios default to the portable baselines.  The CLI loads
-`examples/variants.toml` when this file exists.  To change the default extra
-variants, edit `examples/variants.toml` directly.
+The built-in scenarios default to the portable baselines.  To run extra
+variants, edit or create `config/variants.toml` and select them with
+`--variants`.
 
 `benchmark_settings.toml` is the shared run-settings file.  Each top-level entry
 is a session GUC applied to every variant, before variant-specific GUCs.  Use it
@@ -24,7 +24,7 @@ work_mem = "1GB"
 effective_cache_size = "8GB"
 ```
 
-Use the default extra variants with:
+Use configured extra variants with:
 
 ```bash
 python3 bench/bench.py list variants
@@ -39,7 +39,7 @@ Each `[[variant]]` entry supports:
   Human-readable label used in reviewer tables.
 - `session_gucs`
   Required session-level PostgreSQL parameters for the variant.  Every listed
-  GUC must exist on the target PostgreSQL server.
+  GUC for a selected variant must exist on the target PostgreSQL server.
 
 Patched builds should keep new algorithm switches disabled by default.  Enable
 or tune them explicitly in `session_gucs` for the variants that need them.

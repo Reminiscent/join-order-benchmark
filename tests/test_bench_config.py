@@ -22,6 +22,7 @@ from bench_config import (
     load_variants,
     resolve_dataset_runs,
     resolve_prepare_dataset_runs,
+    resolve_variant_names,
     select_queries,
 )
 
@@ -35,17 +36,17 @@ class BenchConfigTests(unittest.TestCase):
             datasets=("gpuqo_clique_small", "sqlite_select5"),
         )
 
-    def test_load_variants_uses_default_extra_file_when_present(self) -> None:
+    def test_load_variants_includes_built_ins(self) -> None:
         variants = load_variants()
 
-        self.assertIn("dp", variants)
-        self.assertIn("geqo", variants)
-        self.assertIn("goo_cost", variants)
+        self.assertEqual(variants["dp"].label, "dp")
+        self.assertEqual(variants["geqo"].label, "GEQO")
 
-    def test_load_variants_uses_built_ins_when_default_extra_file_is_missing(self) -> None:
+    def test_load_variants_uses_built_ins_when_config_file_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             missing_path = Path(tmpdir) / "missing.toml"
-            with patch.object(bench_config, "DEFAULT_VARIANTS_FILE", missing_path):
+
+            with patch.object(bench_config, "VARIANTS_FILE", missing_path):
                 variants = load_variants()
 
         self.assertEqual(tuple(variants), ("dp", "geqo"))
@@ -90,7 +91,7 @@ class BenchConfigTests(unittest.TestCase):
             "\n",
         )
 
-    def test_load_variants_accepts_extra_file(self) -> None:
+    def test_load_variants_reads_extra_variants_from_config_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "variants.toml"
             path.write_text(
@@ -102,10 +103,21 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
 """
             )
 
-            variants = load_variants(path)
+            with patch.object(bench_config, "VARIANTS_FILE", path):
+                variants = load_variants()
 
         self.assertEqual(tuple(variants), ("dp", "geqo", "my_algo"))
         self.assertEqual(variants["my_algo"].label, "My Algorithm")
+
+    def test_resolve_variant_names_rejects_unknown_variant(self) -> None:
+        variants = {variant.name: variant for variant in bench_config.BUILT_IN_VARIANTS}
+
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            resolve_variant_names(
+                self.make_scenario(),
+                variants,
+                "dp,missing_algo",
+            )
 
     def test_load_variants_rejects_non_scalar_guc_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -118,8 +130,12 @@ session_gucs = { work_mem = ["1GB"] }
 """
             )
 
-            with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
-                load_variants(path)
+            with (
+                patch.object(bench_config, "VARIANTS_FILE", path),
+                redirect_stderr(StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                load_variants()
 
     def test_load_run_settings_reads_session_gucs(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -132,7 +148,7 @@ work_mem = "1GB"
 """
             )
 
-            with patch.object(bench_config, "DEFAULT_SETTINGS_FILE", path):
+            with patch.object(bench_config, "BENCHMARK_SETTINGS_FILE", path):
                 session_gucs = load_run_settings()
 
         self.assertEqual(
@@ -150,7 +166,7 @@ work_mem = "1GB"
             path.write_text("")
 
             with (
-                patch.object(bench_config, "DEFAULT_SETTINGS_FILE", path),
+                patch.object(bench_config, "BENCHMARK_SETTINGS_FILE", path),
                 redirect_stderr(StringIO()),
                 self.assertRaises(SystemExit),
             ):
@@ -167,7 +183,7 @@ value = 1000
             )
 
             with (
-                patch.object(bench_config, "DEFAULT_SETTINGS_FILE", path),
+                patch.object(bench_config, "BENCHMARK_SETTINGS_FILE", path),
                 redirect_stderr(StringIO()),
                 self.assertRaises(SystemExit),
             ):
@@ -183,7 +199,7 @@ value = 1000
             )
 
             with (
-                patch.object(bench_config, "DEFAULT_SETTINGS_FILE", path),
+                patch.object(bench_config, "BENCHMARK_SETTINGS_FILE", path),
                 redirect_stderr(StringIO()),
                 self.assertRaises(SystemExit),
             ):

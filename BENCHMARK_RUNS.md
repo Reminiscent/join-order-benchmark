@@ -18,9 +18,7 @@ python3 bench/bench.py run main --variants dp,geqo
 
 `list scenarios` shows workload groups such as `main`, `extended`, and `planning`.
 `list datasets` shows the query/data sources.  `list variants` shows built-in
-variants plus `examples/variants.toml` when that default file exists.  Edit
-`examples/variants.toml` to change the default extra variants; use
-`--variants-file` only for a different TOML file.
+variants plus any extra variants from `config/variants.toml`.
 
 `main` is the primary public validation scenario.  It runs the complete JOB and
 JOB-Complex workloads.  `extended` adds the heavier CEB IMDB 3k workload.
@@ -44,7 +42,8 @@ Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 `bench.py run <scenario>` performs the measured benchmark run:
 
 1. Resolve the scenario, datasets, variants, and min-join filters.
-2. Check that benchmark databases are reachable and configured GUCs are valid.
+2. Check that benchmark databases are reachable and shared GUCs plus selected
+   variant GUCs are valid.
 3. Select and load the exact query SQL for each dataset.
 4. Unless `--reuse-stats` is passed, stabilize each distinct target database
    with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.  Datasets that
@@ -69,7 +68,7 @@ These values define the public benchmark protocol:
   pass order uses the same rotation rule.
 - By default, each run refreshes table statistics once per distinct database
   before any query runs.
-- Shared session GUCs from `examples/benchmark_settings.toml` are applied before
+- Shared session GUCs from `config/benchmark_settings.toml` are applied before
   variant GUCs for every warmup and measured statement.
 - Non-timeout warmup or measured errors terminate the run after current
   artifacts are written.
@@ -105,10 +104,10 @@ algorithm comparisons differ by variant GUCs instead of accidental run-protocol
 differences.
 
 Each warmup and measured execution starts from `RESET ALL`, then applies shared
-settings from [examples/benchmark_settings.toml](examples/benchmark_settings.toml),
-then applies variant-specific settings.  Every configured GUC must accept its
-value before statistics are refreshed or measured SQL is executed.  The harness
-does not change restart-required cluster settings.
+settings from [config/benchmark_settings.toml](config/benchmark_settings.toml),
+then applies variant-specific settings.  Shared GUCs and selected variant GUCs
+must accept their values before statistics are refreshed or measured SQL is
+executed.  The harness does not change restart-required cluster settings.
 Patched builds should keep new planner algorithms disabled by default; enable or
 tune them explicitly through variant `session_gucs`.
 

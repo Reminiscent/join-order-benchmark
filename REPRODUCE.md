@@ -57,24 +57,19 @@ Dataset details are in [WORKLOADS.md](WORKLOADS.md).
 
 ## Configuration Files
 
-`examples/benchmark_settings.toml` defines shared PostgreSQL session GUCs used
+`config/benchmark_settings.toml` defines shared PostgreSQL session GUCs used
 by every variant.  Keep run-protocol settings there when they should stay
 identical across algorithms or parameter sweeps.
 
-`examples/variants.toml` defines extra variants.  A variant is one named run
-configuration: a label plus algorithm-specific session GUCs.  It can represent
-a different join-order algorithm, or the same algorithm with different
-parameters.  The portable baseline variants `dp` and `geqo` are built in.
+`config/variants.toml` can define optional extra variants.  A variant is one
+named run configuration: a label plus algorithm-specific session GUCs.  It can
+represent a different join-order algorithm, or the same algorithm with
+different parameters.  The portable baseline variants `dp` and `geqo` are built
+in.
 
-Inspect variants from a different file:
-
-```bash
-python3 bench/bench.py list variants --variants-file path/to/variants.toml
-```
-
-Both file formats and defaults are documented in
-[examples/README.md](examples/README.md).  The runner validates configured GUCs
-before refreshing statistics or executing measured SQL.
+Both file formats and defaults are documented in [config/README.md](config/README.md).
+The runner validates shared GUCs and selected variant GUCs before refreshing
+statistics or executing measured SQL.
 
 ## Main Scenario
 
@@ -95,7 +90,7 @@ Run the portable baselines:
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
-Run a patch-specific variant from the default extra variants file:
+Run a patch-specific variant defined in `config/variants.toml`:
 
 ```bash
 python3 bench/bench.py run main --variants dp,geqo,goo_cost
@@ -174,7 +169,6 @@ variants are selected.
 | Option | Use |
 | --- | --- |
 | `--variants` | choose the variants and display/order them explicitly |
-| `--variants-file` | use a different extra variant TOML file |
 | `--min-join` | run only queries with manifest `join_size >= N` |
 | `--reuse-stats` | reuse existing database statistics instead of refreshing them |
 | `--tag` | record a local build or patch label in `run.json` |

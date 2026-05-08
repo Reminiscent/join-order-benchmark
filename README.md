@@ -45,11 +45,9 @@ python3 bench/bench.py run main --variants dp,geqo
 `prepare` recreates benchmark databases; skip it when reusing existing data.
 
 The built-in baselines are `dp` and `geqo`.  Extra variants, such as additional
-algorithms or alternate parameter settings, are defined in
-`examples/variants.toml`; the CLI loads that file by default when it exists.
-Edit it to change the repository's default extra variants.
-Shared PostgreSQL session settings live next to it in
-`examples/benchmark_settings.toml`.
+algorithms or alternate parameter settings, can be defined in
+`config/variants.toml`.  Shared PostgreSQL session settings live in
+`config/benchmark_settings.toml`.
 
 To focus a scenario on larger joins, add a manifest join-size lower bound:
 
@@ -83,7 +81,7 @@ layout, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
 | Area | Purpose |
 | --- | --- |
 | `bench/` | benchmark CLI and runner implementation |
-| `examples/` | default extra variants and shared run settings |
+| `config/` | checked-in variant and shared run settings |
 | `tools/` | query manifest and reviewer-table helpers |
 | `tests/` | harness and reviewer-table tests |
 | workload directories | built-in SQL workloads and dataset load scripts |

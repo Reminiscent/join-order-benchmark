@@ -1,9 +1,8 @@
-"""Benchmark configuration definitions and resolution helpers.
+"""Benchmark configuration registry and file-backed settings.
 
-This module owns the built-in scenarios, variants, shared session GUCs, dataset
-mappings, query manifest access, and SQL wrapping rules.  ``bench.py`` uses it
-to turn CLI choices into concrete prepare/run work before handing execution to
-``bench_prepare.py`` or ``bench_run.py``.
+This module owns the benchmark surface: built-in scenarios and variants,
+checked-in config files, dataset mappings, query manifest access, and SQL
+wrapping rules.  It does not execute PostgreSQL.
 """
 
 from __future__ import annotations
@@ -31,23 +30,14 @@ from bench_common import (
 )
 
 
-IMDB_DATASETS = {"job", "job_complex", "imdb_ceb_3k"}
-
-DEFAULT_DB_BY_DATASET = {
-    "job": "imdb_bench",
-    "job_complex": "imdb_bench",
-    "imdb_ceb_3k": "imdb_bench",
-    "sqlite_select5": "sqlite_select5_bench",
-    "gpuqo_chain_small": "gpuqo_chain_small_bench",
-    "gpuqo_clique_small": "gpuqo_clique_small_bench",
-    "gpuqo_star_small": "gpuqo_star_small_bench",
-    "gpuqo_snowflake_small": "gpuqo_snowflake_small_bench",
-}
-
-DEFAULT_SETTINGS_FILE = REPO_ROOT / "examples" / "benchmark_settings.toml"
-DEFAULT_VARIANTS_FILE = REPO_ROOT / "examples" / "variants.toml"
+# Paths and scalar config values.
+CONFIG_DIR = REPO_ROOT / "config"
+BENCHMARK_SETTINGS_FILE = CONFIG_DIR / "benchmark_settings.toml"
+VARIANTS_FILE = CONFIG_DIR / "variants.toml"
 SCALAR_SETTING_TYPES = (str, int, float, bool)
 
+
+# Built-in benchmark surface.
 DEFAULT_SCENARIO_VARIANTS = ("dp", "geqo")
 BUILT_IN_VARIANTS = (
     Variant(
@@ -79,10 +69,23 @@ PLANNING_DATASETS = (
     "gpuqo_clique_small",
 )
 
+IMDB_DATASETS = {"job", "job_complex", "imdb_ceb_3k"}
+
+DEFAULT_DB_BY_DATASET = {
+    "job": "imdb_bench",
+    "job_complex": "imdb_bench",
+    "imdb_ceb_3k": "imdb_bench",
+    "sqlite_select5": "sqlite_select5_bench",
+    "gpuqo_chain_small": "gpuqo_chain_small_bench",
+    "gpuqo_clique_small": "gpuqo_clique_small_bench",
+    "gpuqo_star_small": "gpuqo_star_small_bench",
+    "gpuqo_snowflake_small": "gpuqo_snowflake_small_bench",
+}
+
 
 # Scenario registry.
 # The CLI exposes only these built-in scenarios; each starts from the same
-# portable baseline variants unless the user passes --variants.
+# portable baseline variants unless the user chooses variants explicitly.
 
 def built_in_scenario(
     *,
@@ -123,36 +126,53 @@ def load_scenarios() -> dict[str, Scenario]:
     return {scenario.name: scenario for scenario in scenarios}
 
 
-# File-backed configuration.
-# These helpers load editable TOML files from examples/, plus the optional
-# explicit variant-file override.
+# Config file loading.
+# ``config/*.toml`` is the editable benchmark configuration entry point.
 
 
-def resolve_variants_file(path: Optional[Path] = None) -> Optional[Path]:
-    """Resolve an explicit variants file or the default examples/variants.toml."""
+def parse_guc_mapping(
+    raw_gucs: dict[str, Any],
+    source_path: Path,
+    *,
+    context: str,
+) -> tuple[tuple[str, Any], ...]:
+    """Parse TOML key/value pairs into validated session GUC assignments."""
 
-    if path is not None:
-        return Path(path)
-    if DEFAULT_VARIANTS_FILE.is_file():
-        return DEFAULT_VARIANTS_FILE
-    return None
+    gucs: list[tuple[str, Any]] = []
+    for raw_name, value in raw_gucs.items():
+        name = str(raw_name).strip()
+        if not name:
+            die(f"{source_path} contains an empty GUC name in {context}")
+        if not isinstance(value, SCALAR_SETTING_TYPES):
+            die(f"{source_path} setting '{name}' in {context} must be a scalar GUC value")
+        gucs.append((name, value))
+    return tuple(gucs)
 
 
-def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
-    """Load built-in variants plus any extra variants from a TOML file."""
+def load_run_settings() -> tuple[tuple[str, Any], ...]:
+    """Load shared session GUCs from config/benchmark_settings.toml."""
+
+    settings_path = BENCHMARK_SETTINGS_FILE
+    if not settings_path.is_file():
+        die(f"missing benchmark settings file: {settings_path}")
+
+    data = tomllib.loads(settings_path.read_text())
+    if not data:
+        die(f"{settings_path} must define at least one benchmark setting")
+    return parse_guc_mapping(data, settings_path, context="benchmark settings")
+
+
+def load_variants() -> dict[str, Variant]:
+    """Load built-in variants plus optional extras from config/variants.toml."""
 
     out = {variant.name: variant for variant in BUILT_IN_VARIANTS}
-    variants_path = resolve_variants_file(path)
-    if variants_path is None:
-        return out
-
-    variants_path = Path(variants_path)
+    variants_path = VARIANTS_FILE
     if not variants_path.is_file():
-        die(f"missing variants file: {variants_path}")
+        return out
     data = tomllib.loads(variants_path.read_text())
-    raw_variants = data.get("variant")
-    if not isinstance(raw_variants, list) or not raw_variants:
-        die(f"{variants_path} must define at least one [[variant]] entry")
+    raw_variants = data.get("variant", [])
+    if not isinstance(raw_variants, list):
+        die(f"{variants_path} field 'variant' must be a [[variant]] list")
 
     for entry in raw_variants:
         if not isinstance(entry, dict):
@@ -176,38 +196,6 @@ def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
             ),
         )
     return out
-
-
-def load_run_settings() -> tuple[tuple[str, Any], ...]:
-    """Load shared session GUCs from examples/benchmark_settings.toml."""
-
-    settings_path = DEFAULT_SETTINGS_FILE
-    if not settings_path.is_file():
-        die(f"missing benchmark settings file: {settings_path}")
-
-    data = tomllib.loads(settings_path.read_text())
-    if not data:
-        die(f"{settings_path} must define at least one benchmark setting")
-    return parse_guc_mapping(data, settings_path, context="benchmark settings")
-
-
-def parse_guc_mapping(
-    raw_gucs: dict[str, Any],
-    source_path: Path,
-    *,
-    context: str,
-) -> tuple[tuple[str, Any], ...]:
-    """Parse TOML key/value pairs into validated session GUC assignments."""
-
-    gucs: list[tuple[str, Any]] = []
-    for raw_name, value in raw_gucs.items():
-        name = str(raw_name).strip()
-        if not name:
-            die(f"{source_path} contains an empty GUC name in {context}")
-        if not isinstance(value, SCALAR_SETTING_TYPES):
-            die(f"{source_path} setting '{name}' in {context} must be a scalar GUC value")
-        gucs.append((name, value))
-    return tuple(gucs)
 
 
 # Query manifest and selection.

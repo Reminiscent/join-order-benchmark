@@ -8,12 +8,10 @@ database setup or execution to the narrower ``bench_*`` modules.
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
-from bench_common import ConnOpts, REPO_ROOT, Scenario, Variant, die
+from bench_common import ConnOpts, Scenario, Variant, die
 from bench_config import (
     BUILT_IN_VARIANTS,
-    DEFAULT_VARIANTS_FILE,
     available_datasets,
     dataset_db_name,
     load_run_settings,
@@ -21,7 +19,6 @@ from bench_config import (
     load_variants,
     resolve_dataset_runs,
     resolve_variant_names,
-    resolve_variants_file,
 )
 from bench_prepare import prepare_scenario
 from bench_run import run_scenario
@@ -43,9 +40,7 @@ def main() -> None:
             print_scenarios(scenarios)
             return
         if args.what == "variants":
-            variants_file = resolve_variants_file(args.variants_file)
-            variants = load_variants(variants_file)
-            print_variants(variants, variants_file)
+            print_variants(load_variants())
             return
         if args.what == "datasets":
             print_datasets()
@@ -69,7 +64,7 @@ def main() -> None:
     if args.cmd == "run":
         # The run path resolves CLI choices before handing execution
         # to bench_run.py, which owns SQL execution and artifact writing.
-        variants = load_variants(args.variants_file)
+        variants = load_variants()
         run_session_gucs = load_run_settings()
         variant_names = resolve_variant_names(scenario, variants, args.variants)
         resolved_runs = resolve_dataset_runs(
@@ -105,17 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--port", type=int, default=None, help="PostgreSQL port to pass to psql")
         p.add_argument("--user", default=None, help="PostgreSQL user to pass to psql")
 
-    def add_variant_file_arg(p: argparse.ArgumentParser) -> None:
-        p.add_argument(
-            "--variants-file",
-            type=Path,
-            default=None,
-            help="override the default examples/variants.toml extra variant file",
-        )
-
     ap_list = sub.add_parser("list", help="List scenarios, variants, or datasets.")
     ap_list.add_argument("what", choices=["scenarios", "variants", "datasets"])
-    add_variant_file_arg(ap_list)
 
     ap_prepare = sub.add_parser("prepare", help="Recreate databases for a scenario.")
     ap_prepare.add_argument("scenario", help="scenario name (see: list scenarios)")
@@ -131,7 +117,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="reuse existing database statistics instead of running VACUUM FREEZE ANALYZE and CHECKPOINT",
     )
-    add_variant_file_arg(ap_run)
     ap_run.add_argument("--tag", default="", help="optional local tag for this run or the build under test")
     add_conn_args(ap_run)
 
@@ -151,15 +136,6 @@ def positive_int(raw: str) -> int:
     return value
 
 
-def display_path(path: Path) -> str:
-    """Render paths relative to the repository root when possible."""
-
-    try:
-        return str(path.resolve().relative_to(REPO_ROOT))
-    except ValueError:
-        return str(path)
-
-
 def print_scenarios(scenarios: dict[str, Scenario]) -> None:
     """Print scenario names, their datasets, and short descriptions."""
 
@@ -172,26 +148,16 @@ def print_scenarios(scenarios: dict[str, Scenario]) -> None:
     print()
 
 
-def print_variants(
-    variants: dict[str, Variant],
-    variants_file: Path | None = None,
-) -> None:
+def print_variants(variants: dict[str, Variant]) -> None:
     """Print built-in and extra variants visible to the CLI."""
 
     built_in_names = {variant.name for variant in BUILT_IN_VARIANTS}
     print("Variants")
-    if variants_file is not None:
-        print(f"extra_variants_file\t{display_path(variants_file)}")
     print("name\tsource\tlabel")
     for name in sorted(variants):
         variant = variants[name]
         source = "builtin" if name in built_in_names else "extra"
         print(f"{variant.name}\t{source}\t{variant.label}")
-    if set(variants) == built_in_names:
-        print(
-            f"Hint: {display_path(DEFAULT_VARIANTS_FILE)} was not found; "
-            "pass --variants-file PATH to include patch-specific variants."
-        )
     print()
 
 

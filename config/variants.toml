@@ -1,4 +1,4 @@
-# Example extra variants used by patched PostgreSQL builds.
+# Extra variants used by patched PostgreSQL builds.
 
 [[variant]]
 name = "goo_cost"

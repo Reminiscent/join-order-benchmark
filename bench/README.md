@@ -62,4 +62,4 @@ tools/render_review_tables.py
 ```
 
 Scenario and dataset coverage is described in [../WORKLOADS.md](../WORKLOADS.md).
-Extra variant file fields are described in [../examples/README.md](../examples/README.md).
+Config file fields are described in [../config/README.md](../config/README.md).
