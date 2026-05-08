@@ -42,15 +42,15 @@ class Variant:
     name: str
     label: str
     session_gucs: tuple[tuple[str, Any], ...]
+    baseline: bool = False
 
 
 @dataclass(frozen=True)
 class Scenario:
-    """A public benchmark scenario and its default variant selection."""
+    """A public benchmark scenario and its workload selection."""
 
     name: str
     description: str
-    default_variants: tuple[str, ...]
     datasets: tuple[str, ...]
 
 

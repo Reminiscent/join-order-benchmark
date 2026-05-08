@@ -11,7 +11,6 @@ import argparse
 
 from bench_common import ConnOpts, Scenario, Variant, die
 from bench_config import (
-    BUILT_IN_VARIANTS,
     available_datasets,
     dataset_db_name,
     load_run_settings,
@@ -110,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     ap_run = sub.add_parser("run", help="Run a scenario and write results to outputs/<run_id>/")
     ap_run.add_argument("scenario", help="scenario name (see: list scenarios)")
-    ap_run.add_argument("--variants", default=None, help="variant1,variant2 (optional override)")
+    ap_run.add_argument("--variants", default=None, help="variant1,variant2 (override configured baselines)")
     ap_run.add_argument("--min-join", type=positive_int, default=None, help="only run queries with join_size >= N")
     ap_run.add_argument(
         "--reuse-stats",
@@ -149,15 +148,13 @@ def print_scenarios(scenarios: dict[str, Scenario]) -> None:
 
 
 def print_variants(variants: dict[str, Variant]) -> None:
-    """Print built-in and extra variants visible to the CLI."""
+    """Print configured variants visible to the CLI."""
 
-    built_in_names = {variant.name for variant in BUILT_IN_VARIANTS}
     print("Variants")
-    print("name\tsource\tlabel")
-    for name in sorted(variants):
-        variant = variants[name]
-        source = "builtin" if name in built_in_names else "extra"
-        print(f"{variant.name}\t{source}\t{variant.label}")
+    print("name\tbaseline\tlabel")
+    for variant in variants.values():
+        baseline = "yes" if variant.baseline else "no"
+        print(f"{variant.name}\t{baseline}\t{variant.label}")
     print()
 
 

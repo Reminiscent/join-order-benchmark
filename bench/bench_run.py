@@ -113,6 +113,7 @@ def run_scenario(
         {
             "name": variants_registry[name].name,
             "label": variants_registry[name].label,
+            "baseline": variants_registry[name].baseline,
             "session_gucs": [{k: v} for k, v in variants_registry[name].session_gucs],
         }
         for name in variant_names

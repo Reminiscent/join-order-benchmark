@@ -72,7 +72,7 @@ Important fields:
 | `scenario_description` | Description from the built-in scenario definition. |
 | `session_gucs` | Shared session GUCs applied before every variant. |
 | `protocol` | Measured reps, warmup runs, timing mode, variant order, and stats refresh rule used by the run. |
-| `variants` | Resolved variant names, labels, and session GUCs used in this run. |
+| `variants` | Resolved variant names, labels, baseline flags, and session GUCs used in this run. |
 | `datasets` | Resolved dataset entries, the min-join filter, and the variants actually run for each entry. |
 | `tag` | Optional user-provided build or patch label. |
 | `warmup_failures` | Warmup timeout/error records, if any. |
@@ -173,13 +173,13 @@ The workbook is the reviewer-facing attachment: it has frozen headers, grouped
 metric and ratio columns, number formats, a `SUM` row, and ratio colors.  The
 XLSX export uses optional `XlsxWriter`; benchmark prepare/run does not need it.
 
-Ratio columns are direct `variant/reference` ratios: every non-reference
-variant is compared to `dp` when `dp` is selected, and to `geqo` when `geqo` is
-selected.  `dp` and `geqo` are not compared with each other.  For normal
-benchmark scenarios, execution time is the primary result; for the `planning`
-scenario, use the planning-time sheet as the primary signal.  All datasets
-recorded in `run.json` are shown in one table, with `dataset` as the first
-column, so the uploaded attachment count stays small even for larger runs.
+Ratio columns are direct `variant/reference` ratios: every non-baseline variant
+is compared to each selected baseline variant recorded in `run.json`.  Baseline
+variants are not compared with each other.  For normal benchmark scenarios,
+execution time is the primary result; for the `planning` scenario, use the
+planning-time sheet as the primary signal.  All datasets recorded in `run.json`
+are shown in one table, with `dataset` as the first column, so the uploaded
+attachment count stays small even for larger runs.
 Workbook column headers use variant labels from `run.json`, falling back to
 variant names when no label is recorded.
 

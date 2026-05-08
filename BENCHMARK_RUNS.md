@@ -17,8 +17,8 @@ python3 bench/bench.py run main --variants dp,geqo
 ```
 
 `list scenarios` shows workload groups such as `main`, `extended`, and `planning`.
-`list datasets` shows the query/data sources.  `list variants` shows built-in
-variants plus any extra variants from `config/variants.toml`.
+`list datasets` shows the query/data sources.  `list variants` shows the
+configured variants from `config/variants.toml`.
 
 `main` is the primary public validation scenario.  It runs the complete JOB and
 JOB-Complex workloads.  `extended` adds the heavier CEB IMDB 3k workload.
@@ -107,9 +107,8 @@ Each warmup and measured execution starts from `RESET ALL`, then applies shared
 settings from [config/benchmark_settings.toml](config/benchmark_settings.toml),
 then applies variant-specific settings.  Shared GUCs and selected variant GUCs
 must accept their values before statistics are refreshed or measured SQL is
-executed.  The harness does not change restart-required cluster settings.
-Patched builds should keep new planner algorithms disabled by default; enable or
-tune them explicitly through variant `session_gucs`.
+executed.  GUCs for variants that were not selected are not checked.  The
+harness does not change restart-required cluster settings.
 
 ## Timing Collection
 

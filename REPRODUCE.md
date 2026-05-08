@@ -42,7 +42,7 @@ The harness still selects the database names itself.
 
 ## Discover
 
-List the built-in benchmark surface:
+List the benchmark surface:
 
 ```bash
 python3 bench/bench.py list scenarios
@@ -61,11 +61,10 @@ Dataset details are in [WORKLOADS.md](WORKLOADS.md).
 by every variant.  Keep run-protocol settings there when they should stay
 identical across algorithms or parameter sweeps.
 
-`config/variants.toml` can define optional extra variants.  A variant is one
-named run configuration: a label plus algorithm-specific session GUCs.  It can
-represent a different join-order algorithm, or the same algorithm with
-different parameters.  The portable baseline variants `dp` and `geqo` are built
-in.
+`config/variants.toml` defines algorithm variants.  A variant is one named run
+configuration: a label, an optional `baseline = true` marker, and
+variant-specific session GUCs.  Baseline variants are used when `--variants` is
+omitted and as reviewer-table ratio references when they are part of a run.
 
 Both file formats and defaults are documented in [config/README.md](config/README.md).
 The runner validates shared GUCs and selected variant GUCs before refreshing
@@ -84,7 +83,7 @@ python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 `prepare` always recreates the scenario's benchmark databases.  If you want to
 reuse existing data, skip `prepare` and run the benchmark directly.
 
-Run the portable baselines:
+Run the configured baselines:
 
 ```bash
 python3 bench/bench.py run main --variants dp,geqo
@@ -112,10 +111,10 @@ python3 bench/bench.py prepare planning
 python3 bench/bench.py run planning --variants geqo,goo_combined
 ```
 
-All scenarios share the same default variants.  Use `--variants` to choose the
-algorithms or parameter settings for a run; for `planning`, omitting `dp` is
-usually more useful because large synthetic joins make dynamic programming very
-slow.
+Scenarios choose datasets; variants choose algorithms or parameter settings.
+Use `--variants` to override the configured baselines.  For `planning`,
+omitting `dp` is usually more useful because large synthetic joins make dynamic
+programming very slow.
 
 ## Join-Size Filter
 
@@ -161,14 +160,14 @@ python3 tools/render_review_tables.py outputs/<run_id>
 
 The script writes `outputs/<run_id>/review.xlsx`.  Workbook layout, `SUM` row
 semantics, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
-Ratio columns compare non-reference variants to `dp` and/or `geqo` when those
-variants are selected.
+Ratio columns compare non-baseline variants to the selected baseline variants
+recorded in `run.json`.
 
 ## Common Run Options
 
 | Option | Use |
 | --- | --- |
-| `--variants` | choose the variants and display/order them explicitly |
+| `--variants` | override the configured baseline variants and display order |
 | `--min-join` | run only queries with manifest `join_size >= N` |
 | `--reuse-stats` | reuse existing database statistics instead of refreshing them |
 | `--tag` | record a local build or patch label in `run.json` |

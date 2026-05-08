@@ -32,24 +32,27 @@ class BenchConfigTests(unittest.TestCase):
         return Scenario(
             name="planning",
             description="test scenario",
-            default_variants=("dp", "geqo"),
             datasets=("gpuqo_clique_small", "sqlite_select5"),
         )
 
-    def test_load_variants_includes_built_ins(self) -> None:
+    def test_load_variants_reads_configured_baselines(self) -> None:
         variants = load_variants()
 
         self.assertEqual(variants["dp"].label, "dp")
         self.assertEqual(variants["geqo"].label, "GEQO")
+        self.assertTrue(variants["dp"].baseline)
+        self.assertTrue(variants["geqo"].baseline)
 
-    def test_load_variants_uses_built_ins_when_config_file_is_missing(self) -> None:
+    def test_load_variants_requires_config_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             missing_path = Path(tmpdir) / "missing.toml"
 
-            with patch.object(bench_config, "VARIANTS_FILE", missing_path):
-                variants = load_variants()
-
-        self.assertEqual(tuple(variants), ("dp", "geqo"))
+            with (
+                patch.object(bench_config, "VARIANTS_FILE", missing_path),
+                redirect_stderr(StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                load_variants()
 
     def test_load_scenarios_uses_built_in_definitions(self) -> None:
         scenarios = load_scenarios()
@@ -73,11 +76,8 @@ class BenchConfigTests(unittest.TestCase):
                 "gpuqo_clique_small",
             ],
         )
-        self.assertTrue(
-            all(scenario.default_variants == ("dp", "geqo") for scenario in scenarios.values())
-        )
 
-    def test_print_scenarios_omits_default_variants(self) -> None:
+    def test_print_scenarios_shows_workload_fields_only(self) -> None:
         out = io.StringIO()
 
         with redirect_stdout(out):
@@ -91,7 +91,26 @@ class BenchConfigTests(unittest.TestCase):
             "\n",
         )
 
-    def test_load_variants_reads_extra_variants_from_config_file(self) -> None:
+    def test_print_variants_shows_baseline_flag(self) -> None:
+        out = io.StringIO()
+        variants = {
+            "dp": bench_config.Variant(name="dp", label="dp", session_gucs=(), baseline=True),
+            "my_algo": bench_config.Variant(name="my_algo", label="My Algorithm", session_gucs=()),
+        }
+
+        with redirect_stdout(out):
+            bench.print_variants(variants)
+
+        self.assertEqual(
+            out.getvalue(),
+            "Variants\n"
+            "name\tbaseline\tlabel\n"
+            "dp\tyes\tdp\n"
+            "my_algo\tno\tMy Algorithm\n"
+            "\n",
+        )
+
+    def test_load_variants_reads_entries_from_config_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "variants.toml"
             path.write_text(
@@ -99,6 +118,7 @@ class BenchConfigTests(unittest.TestCase):
 [[variant]]
 name = "my_algo"
 label = "My Algorithm"
+baseline = true
 session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
 """
             )
@@ -106,11 +126,12 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
             with patch.object(bench_config, "VARIANTS_FILE", path):
                 variants = load_variants()
 
-        self.assertEqual(tuple(variants), ("dp", "geqo", "my_algo"))
+        self.assertEqual(tuple(variants), ("my_algo",))
         self.assertEqual(variants["my_algo"].label, "My Algorithm")
+        self.assertTrue(variants["my_algo"].baseline)
 
     def test_resolve_variant_names_rejects_unknown_variant(self) -> None:
-        variants = {variant.name: variant for variant in bench_config.BUILT_IN_VARIANTS}
+        variants = {"dp": bench_config.Variant(name="dp", label="dp", session_gucs=(), baseline=True)}
 
         with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
             resolve_variant_names(
@@ -118,6 +139,25 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
                 variants,
                 "dp,missing_algo",
             )
+
+    def test_resolve_variant_names_uses_configured_baselines_by_default(self) -> None:
+        variants = {
+            "dp": bench_config.Variant(name="dp", label="dp", session_gucs=(), baseline=True),
+            "geqo": bench_config.Variant(name="geqo", label="GEQO", session_gucs=(), baseline=True),
+            "my_algo": bench_config.Variant(name="my_algo", label="My Algorithm", session_gucs=()),
+        }
+
+        names = resolve_variant_names(self.make_scenario(), variants, None)
+
+        self.assertEqual(names, ("dp", "geqo"))
+
+    def test_resolve_variant_names_requires_baseline_when_no_override(self) -> None:
+        variants = {
+            "my_algo": bench_config.Variant(name="my_algo", label="My Algorithm", session_gucs=()),
+        }
+
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            resolve_variant_names(self.make_scenario(), variants, None)
 
     def test_load_variants_rejects_non_scalar_guc_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -127,6 +167,25 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
 [[variant]]
 name = "bad"
 session_gucs = { work_mem = ["1GB"] }
+"""
+            )
+
+            with (
+                patch.object(bench_config, "VARIANTS_FILE", path),
+                redirect_stderr(StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                load_variants()
+
+    def test_load_variants_rejects_non_boolean_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "variants.toml"
+            path.write_text(
+                """
+[[variant]]
+name = "bad"
+baseline = "yes"
+session_gucs = {}
 """
             )
 

@@ -36,8 +36,8 @@ class BenchReviewTablesTests(unittest.TestCase):
                     "run_id": "run1",
                     "scenario": "main",
                     "variants": [
-                        {"name": "dp", "label": "dp"},
-                        {"name": "geqo", "label": "GEQO"},
+                        {"name": "dp", "label": "dp", "baseline": True},
+                        {"name": "geqo", "label": "GEQO", "baseline": True},
                         {"name": "my_algo", "label": "My Algorithm"},
                         {"name": "fast_algo", "label": "Fast Algorithm"},
                         {"name": "bad_algo", "label": "Bad Algorithm"},
@@ -124,7 +124,7 @@ class BenchReviewTablesTests(unittest.TestCase):
         self.assertEqual(xlsx_format_key(slow), "ratio_slow")
         self.assertEqual(xlsx_format_key(slower), "ratio_slower")
 
-    def test_selected_dp_and_geqo_are_ratio_references(self) -> None:
+    def test_selected_baselines_are_ratio_references(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = self.make_run_dir(tmpdir)
             run_context = json.loads((run_dir / "run.json").read_text())
@@ -136,7 +136,6 @@ class BenchReviewTablesTests(unittest.TestCase):
                 query_order=query_order,
                 datasets=["job"],
                 metric="execution",
-                variants_csv=None,
             )
 
         self.assertEqual(table.ratio_references, ("dp", "geqo"))
@@ -159,6 +158,11 @@ class BenchReviewTablesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = self.make_run_dir(tmpdir)
             run_context = json.loads((run_dir / "run.json").read_text())
+            run_context["variants"] = [
+                entry
+                for entry in run_context["variants"]
+                if entry["name"] in {"geqo", "my_algo"}
+            ]
             rows_by_dataset, query_order = load_summary_rows(run_dir / "summary.csv")
 
             table = build_review_table(
@@ -167,7 +171,6 @@ class BenchReviewTablesTests(unittest.TestCase):
                 query_order=query_order,
                 datasets=["job"],
                 metric="execution",
-                variants_csv="geqo,my_algo",
             )
 
         self.assertEqual(table.ratio_references, ("geqo",))
@@ -190,7 +193,6 @@ class BenchReviewTablesTests(unittest.TestCase):
                 query_order=query_order,
                 datasets=["job"],
                 metric="execution",
-                variants_csv="dp,my_algo,fast_algo",
             )
 
         self.assertEqual(table.labels["dp"], "dp")
@@ -228,7 +230,6 @@ class BenchReviewTablesTests(unittest.TestCase):
                 query_order=query_order,
                 datasets=["job"],
                 metric="execution",
-                variants_csv=None,
             )
         worksheet = FakeWorksheet()
 

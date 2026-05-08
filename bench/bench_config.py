@@ -1,7 +1,7 @@
 """Benchmark configuration registry and file-backed settings.
 
-This module owns the benchmark surface: built-in scenarios and variants,
-checked-in config files, dataset mappings, query manifest access, and SQL
+This module owns the benchmark surface: built-in scenarios, checked-in config
+files, dataset mappings, query manifest access, variant resolution, and SQL
 wrapping rules.  It does not execute PostgreSQL.
 """
 
@@ -37,21 +37,7 @@ VARIANTS_FILE = CONFIG_DIR / "variants.toml"
 SCALAR_SETTING_TYPES = (str, int, float, bool)
 
 
-# Built-in benchmark surface.
-DEFAULT_SCENARIO_VARIANTS = ("dp", "geqo")
-BUILT_IN_VARIANTS = (
-    Variant(
-        name="dp",
-        label="dp",
-        session_gucs=(("geqo_threshold", 100),),
-    ),
-    Variant(
-        name="geqo",
-        label="GEQO",
-        session_gucs=(("geqo_threshold", 2),),
-    ),
-)
-
+# Built-in scenario surface.
 MAIN_DATASETS = (
     "job",
     "job_complex",
@@ -84,8 +70,8 @@ DEFAULT_DB_BY_DATASET = {
 
 
 # Scenario registry.
-# The CLI exposes only these built-in scenarios; each starts from the same
-# portable baseline variants unless the user chooses variants explicitly.
+# Scenarios select workload groups only.  Algorithm choices come from
+# config/variants.toml and the CLI --variants override.
 
 def built_in_scenario(
     *,
@@ -93,12 +79,11 @@ def built_in_scenario(
     description: str,
     datasets: tuple[str, ...],
 ) -> Scenario:
-    """Create a built-in scenario with repository-wide default variants."""
+    """Create one public scenario from a workload list."""
 
     return Scenario(
         name=name,
         description=description,
-        default_variants=DEFAULT_SCENARIO_VARIANTS,
         datasets=datasets,
     )
 
@@ -163,17 +148,19 @@ def load_run_settings() -> tuple[tuple[str, Any], ...]:
 
 
 def load_variants() -> dict[str, Variant]:
-    """Load built-in variants plus optional extras from config/variants.toml."""
+    """Load the configured variant registry from config/variants.toml."""
 
-    out = {variant.name: variant for variant in BUILT_IN_VARIANTS}
     variants_path = VARIANTS_FILE
     if not variants_path.is_file():
-        return out
+        die(f"missing variants file: {variants_path}")
     data = tomllib.loads(variants_path.read_text())
     raw_variants = data.get("variant", [])
     if not isinstance(raw_variants, list):
         die(f"{variants_path} field 'variant' must be a [[variant]] list")
+    if not raw_variants:
+        die(f"{variants_path} must define at least one [[variant]]")
 
+    out: dict[str, Variant] = {}
     for entry in raw_variants:
         if not isinstance(entry, dict):
             die(f"bad [[variant]] entry in {variants_path}")
@@ -181,8 +168,11 @@ def load_variants() -> dict[str, Variant]:
         if not name:
             die(f"variant in {variants_path} is missing name")
         if name in out:
-            die(f"variant file cannot redefine built-in or duplicate variant '{name}'")
+            die(f"{variants_path} contains duplicate variant '{name}'")
         label = str(entry.get("label", name)).strip() or name
+        baseline = entry.get("baseline", False)
+        if not isinstance(baseline, bool):
+            die(f"variant '{name}' has non-boolean baseline in {variants_path}")
         raw_gucs = entry.get("session_gucs", {})
         if not isinstance(raw_gucs, dict):
             die(f"variant '{name}' has invalid session_gucs in {variants_path}")
@@ -194,6 +184,7 @@ def load_variants() -> dict[str, Variant]:
                 variants_path,
                 context=f"variant '{name}' session_gucs",
             ),
+            baseline=baseline,
         )
     return out
 
@@ -272,9 +263,15 @@ def resolve_variant_names(
 ) -> tuple[str, ...]:
     """Resolve the effective variant order for a scenario run."""
 
-    names = tuple(parse_csv_list(override_csv)) if override_csv else scenario.default_variants
+    if override_csv:
+        names = tuple(parse_csv_list(override_csv))
+    else:
+        names = tuple(name for name, variant in variants.items() if variant.baseline)
     if not names:
-        die(f"scenario '{scenario.name}' does not define default_variants and no --variants were provided")
+        die(
+            f"scenario '{scenario.name}' has no configured baseline variants; "
+            "pass --variants or mark at least one variant with baseline = true"
+        )
     for name in names:
         if name not in variants:
             die(f"unknown variant '{name}' (see: python3 bench/bench.py list variants)")

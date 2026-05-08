@@ -38,7 +38,6 @@ class RunScenarioTests(unittest.TestCase):
         return Scenario(
             name="main",
             description="test scenario",
-            default_variants=("dp",),
             datasets=(),
         )
 
@@ -46,7 +45,7 @@ class RunScenarioTests(unittest.TestCase):
         return (("statement_timeout", 1000), ("work_mem", "1GB"))
 
     def make_variant_registry(self) -> dict[str, Variant]:
-        return {"dp": Variant(name="dp", label="dp", session_gucs=())}
+        return {"dp": Variant(name="dp", label="dp", session_gucs=(), baseline=True)}
 
     def make_resolved_runs(self) -> list[ResolvedDatasetRun]:
         return [
@@ -352,6 +351,10 @@ class RunScenarioTests(unittest.TestCase):
                     "variant_order": "rotate_by_query_and_rep",
                     "stats_refresh": "before_run",
                 },
+            )
+            self.assertEqual(
+                run_context["variants"],
+                [{"baseline": True, "label": "dp", "name": "dp", "session_gucs": []}],
             )
 
     def test_reuse_stats_skips_database_stabilization(self) -> None:

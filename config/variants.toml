@@ -1,4 +1,16 @@
-# Extra variants used by patched PostgreSQL builds.
+# Benchmark algorithm variants.
+
+[[variant]]
+name = "dp"
+label = "dp"
+baseline = true
+session_gucs = { geqo_threshold = 100 }
+
+[[variant]]
+name = "geqo"
+label = "GEQO"
+baseline = true
+session_gucs = { geqo_threshold = 2 }
 
 [[variant]]
 name = "goo_cost"

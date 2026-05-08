@@ -13,16 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from bench_common import parse_csv_list
-
-
 METRICS = {
     "execution": ("execution_ms_median", "Execution Time"),
     "planning": ("planning_ms_median", "Planning Time"),
 }
 
 DEFAULT_METRICS = ("execution", "planning")
-REFERENCE_VARIANTS = ("dp", "geqo")
 XLSX_MISSING_DEPENDENCY = (
     "missing optional dependency: install XlsxWriter before rendering reviewer XLSX tables "
     "(for example: python3 -m pip install XlsxWriter)"
@@ -211,19 +207,32 @@ def ratio_to_reference(value: float | None, reference_value: float | None) -> fl
     return value / reference_value
 
 
-# Variant order and reference selection.
+# Variant order and baseline selection.
 
 
-def resolve_ratio_references(variants: tuple[str, ...]) -> tuple[str, ...]:
-    """Use selected built-in references only when they were part of the run."""
-    return tuple(variant for variant in REFERENCE_VARIANTS if variant in variants)
+def resolve_ratio_references(
+    run_context: dict[str, Any],
+    variants: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Use selected baseline variants as reviewer ratio references."""
+
+    baselines = {
+        str(entry.get("name"))
+        for entry in run_context.get("variants", [])
+        if (
+            isinstance(entry, dict)
+            and entry.get("name")
+            and entry.get("baseline") is True
+        )
+    }
+    return tuple(variant for variant in variants if variant in baselines)
 
 
 def build_ratio_pairs(variants: tuple[str, ...], references: tuple[str, ...]) -> tuple[RatioPair, ...]:
     """Build reviewer comparison pairs.
 
-    Each non-reference variant is compared against every selected reference;
-    references are not compared with each other.
+    Each non-baseline variant is compared against every selected baseline;
+    baselines are not compared with each other.
     """
     reference_set = set(references)
     return tuple(
@@ -248,28 +257,24 @@ def resolve_combined_variant_order(
     run_context: dict[str, Any],
     rows_by_dataset: dict[str, dict[str, dict[str, SummaryRow]]],
     selected_datasets: list[str],
-    variants_csv: Optional[str],
 ) -> tuple[str, ...]:
     """Resolve the displayed variant order for combined datasets.
 
-    An explicit CLI order wins; otherwise ``run.json`` order is used before
-    falling back to variants discovered in ``summary.csv``.
+    ``run.json`` order is used before falling back to variants discovered in
+    ``summary.csv`` for older or partial artifacts.
     """
-    if variants_csv:
-        variants = tuple(parse_csv_list(variants_csv))
+    configured = [
+        str(entry["name"])
+        for entry in run_context.get("variants", [])
+        if isinstance(entry, dict) and entry.get("name")
+    ]
+    if configured:
+        variants = tuple(configured)
     else:
-        configured = [
-            str(entry["name"])
-            for entry in run_context.get("variants", [])
-            if isinstance(entry, dict) and entry.get("name")
-        ]
-        if configured:
-            variants = tuple(configured)
-        else:
-            found: list[str] = []
-            for dataset in selected_datasets:
-                found.extend(rows_by_dataset.get(dataset, {}))
-            variants = tuple(sorted(set(found)))
+        found: list[str] = []
+        for dataset in selected_datasets:
+            found.extend(rows_by_dataset.get(dataset, {}))
+        variants = tuple(sorted(set(found)))
 
     missing = [
         variant
@@ -301,7 +306,6 @@ def build_review_table(
     query_order: dict[str, list[str]],
     datasets: list[str],
     metric: str,
-    variants_csv: Optional[str],
 ) -> ReviewTable:
     """Construct one metric-specific review table from loaded run results.
 
@@ -319,9 +323,8 @@ def build_review_table(
         run_context=run_context,
         rows_by_dataset=rows_by_dataset,
         selected_datasets=datasets,
-        variants_csv=variants_csv,
     )
-    ratio_references = resolve_ratio_references(variants)
+    ratio_references = resolve_ratio_references(run_context, variants)
     ratio_pairs = build_ratio_pairs(variants, ratio_references)
 
     labels = label_map(run_context, variants)
@@ -642,7 +645,6 @@ def write_review_tables(
     *,
     run_dir: Path,
     datasets: list[str],
-    variants_csv: Optional[str] = None,
 ) -> list[Path]:
     """Build the standard reviewer workbook for a benchmark run directory."""
     run_json = run_dir / "run.json"
@@ -674,7 +676,6 @@ def write_review_tables(
             query_order=query_order,
             datasets=selected_datasets,
             metric=metric,
-            variants_csv=variants_csv,
         )
         tables.append(table)
     workbook_path = run_dir / "review.xlsx"

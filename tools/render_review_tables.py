@@ -29,7 +29,6 @@ def main() -> None:
     paths = write_review_tables(
         run_dir=Path(args.run_dir).resolve(),
         datasets=[],
-        variants_csv=None,
     )
     for path in paths:
         print(path)
