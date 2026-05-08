@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from bench_workloads import build_statement, load_sql_for_query, select_queries
 from bench_common import (
@@ -40,7 +40,7 @@ WARMUP_TIMEOUT_CATEGORY = "statement_timeout"
 WARMUP_TIMEOUT_SKIP_PREFIX = "skipped measured run after warmup timeout:"
 
 
-# Run state.
+# Run data models.
 
 
 @dataclass
@@ -74,7 +74,7 @@ class PreparedRunWork:
     query_statements: list[tuple[QueryMeta, str]]
 
 
-# Scenario execution.
+# Scenario orchestration.
 
 
 def run_scenario(
@@ -121,53 +121,24 @@ def run_scenario(
         for name in variant_names
     ]
 
-    # Stage 2: initialize the in-memory rows that feed the run artifacts.
+    # Stage 2: initialize run state and print the run header.
+    state = RunState()
     print(f"[run] scenario={scenario.name}")
     print(f"[run] variants={','.join(variant_names)}")
     print(f"[run] warmup_passes={WARMUP_RUNS} measured_reps={MEASURED_REPS}")
     print(f"[run] stats_refresh={stats_refresh}")
     print(f"[run] outputs={out_dir}")
 
-    state = RunState()
-    dataset_contexts: list[dict[str, Any]] = []
-    processed_dbs: set[str] = set()
-    prepared_runs: list[PreparedRunWork] = []
+    # Stage 3: prepare dataset-level work before any measured rows are written.
+    dataset_contexts, prepared_runs = prepare_dataset_work(
+        resolved_runs=resolved_runs,
+        variants_registry=variants_registry,
+        conn=conn,
+        reuse_stats=reuse_stats,
+    )
 
-    # Stage 3: refresh or reuse database statistics, then build the exact query
-    # list and SQL statements that will run.  This catches missing SQL files
-    # before measured rows start to appear in the artifacts.
-    for spec in resolved_runs:
-        if spec.db not in processed_dbs:
-            # Multiple dataset entries can target the same database; refresh it once.
-            if not reuse_stats:
-                stabilize_db(spec.db, conn)
-            processed_dbs.add(spec.db)
-
-        queries = select_queries(spec)
-        query_statements = [(q, build_statement(spec.dataset, load_sql_for_query(q))) for q in queries]
-        dataset_contexts.append(
-            {
-                "dataset": spec.dataset,
-                "min_join": spec.min_join,
-                "variants": list(spec.variants),
-            }
-        )
-        print(
-            f"[run] dataset={spec.dataset} db={spec.db} queries={len(query_statements)} "
-            f"variants={','.join(spec.variants)} min_join={spec.min_join}"
-        )
-
-        selected_variants = [variants_registry[name] for name in spec.variants]
-        prepared_runs.append(
-            PreparedRunWork(
-                spec=spec,
-                selected_variants=selected_variants,
-                query_statements=query_statements,
-            )
-        )
-
-    # Stage 4: write run.json before executing groups so the output directory
-    # immediately records the requested scenario, datasets, and variants.
+    # Stage 4: write the initial artifacts so the output directory immediately
+    # records the requested scenario, datasets, and variants.
     def write_current_artifacts() -> None:
         # Flush the whole artifact set from memory so interrupted runs remain inspectable.
         flush_outputs(
@@ -185,8 +156,92 @@ def run_scenario(
 
     write_current_artifacts()
 
-    # Stage 5: execute warmup and measured groups.  Each measured repetition
-    # runs all variants once for the same query, with the variant order rotated.
+    # Stage 5: execute warmup and measured groups, flushing artifacts after
+    # every group so partial runs remain inspectable.
+    execute_prepared_work(
+        scenario=scenario,
+        prepared_runs=prepared_runs,
+        state=state,
+        conn=conn,
+        statement_timeout_ms=statement_timeout_ms,
+        write_current_artifacts=write_current_artifacts,
+    )
+
+    # Stage 6: summarize failures after the latest artifact flush.
+    summarize_run_completion(state)
+
+
+# Dataset work preparation.
+
+
+def prepare_dataset_work(
+    *,
+    resolved_runs: list[ResolvedDatasetRun],
+    variants_registry: dict[str, Variant],
+    conn: Optional[ConnOpts],
+    reuse_stats: bool,
+) -> tuple[list[dict[str, Any]], list[PreparedRunWork]]:
+    """Refresh stats as needed and prepare dataset work for the run.
+
+    The returned dataset contexts are written to run.json.  The PreparedRunWork
+    objects are consumed by the warmup/measured execution loop.
+    """
+
+    dataset_contexts: list[dict[str, Any]] = []
+    prepared_runs: list[PreparedRunWork] = []
+    processed_dbs: set[str] = set()
+
+    for spec in resolved_runs:
+        if spec.db not in processed_dbs:
+            # Multiple dataset entries can target the same database; refresh it once.
+            if not reuse_stats:
+                stabilize_db(spec.db, conn)
+            processed_dbs.add(spec.db)
+
+        queries = select_queries(spec)
+        query_statements = [
+            (query, build_statement(spec.dataset, load_sql_for_query(query)))
+            for query in queries
+        ]
+        dataset_contexts.append(
+            {
+                "dataset": spec.dataset,
+                "min_join": spec.min_join,
+                "variants": list(spec.variants),
+            }
+        )
+        print(
+            f"[run] dataset={spec.dataset} db={spec.db} queries={len(query_statements)} "
+            f"variants={','.join(spec.variants)} min_join={spec.min_join}"
+        )
+
+        prepared_runs.append(
+            PreparedRunWork(
+                spec=spec,
+                selected_variants=[variants_registry[name] for name in spec.variants],
+                query_statements=query_statements,
+            )
+        )
+
+    return dataset_contexts, prepared_runs
+
+
+# Warmup and measured execution.
+
+
+def execute_prepared_work(
+    *,
+    scenario: Scenario,
+    prepared_runs: list[PreparedRunWork],
+    state: RunState,
+    conn: Optional[ConnOpts],
+    statement_timeout_ms: int,
+    write_current_artifacts: Callable[[], None],
+) -> None:
+    """Run every prepared query group and flush artifacts after each group."""
+
+    # Each measured repetition runs all variants once for the same query, with
+    # the variant order rotated.
     for prepared in prepared_runs:
         for query_idx, (query, stmt) in enumerate(prepared.query_statements):
             for warmup_pass in range(1, WARMUP_RUNS + 1):
@@ -205,10 +260,7 @@ def run_scenario(
                 )
                 write_current_artifacts()
                 if state.termination is not None:
-                    break
-
-            if state.termination is not None:
-                break
+                    return
 
             for rep in range(1, MEASURED_REPS + 1):
                 state.termination = execute_measured_group(
@@ -227,19 +279,7 @@ def run_scenario(
                 )
                 write_current_artifacts()
                 if state.termination is not None:
-                    break
-
-            if state.termination is not None:
-                break
-
-        if state.termination is not None:
-            break
-
-    # Stage 6: summarize failures after the latest artifact flush.
-    summarize_run_completion(state)
-
-
-# Warmup and measured group execution.
+                    return
 
 
 def execute_warmup_group(
