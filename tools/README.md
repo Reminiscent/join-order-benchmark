@@ -43,8 +43,8 @@ variant order from `run.json`.
 Example row:
 
 ```csv
-dataset,query_id,query_path,query_label,join_size,sql_sha1
-job,10a,join-order-benchmark/queries/10a.sql,,7,1fe1fac887e587704d8acfcf101d8ddb889af0bb
+dataset,query_id,query_path,join_size,sql_sha1
+job,10a,join-order-benchmark/queries/10a.sql,7,1fe1fac887e587704d8acfcf101d8ddb889af0bb
 ```
 
 - `dataset`
@@ -53,8 +53,6 @@ job,10a,join-order-benchmark/queries/10a.sql,,7,1fe1fac887e587704d8acfcf101d8ddb
   Stable query id within that dataset.
 - `query_path`
   Repo-relative path to the SQL file.
-- `query_label`
-  Optional label, mainly for `sqlite_select5`.
 - `join_size`
   Base-relation count used for join-size filters and reviewer tables.  The
   manifest builder removes full-line `--` comments, captures the first `FROM`

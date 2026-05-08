@@ -20,13 +20,11 @@ class QueryEntry:
     dataset: str
     query_id: str
     query_path: str
-    query_label: str
     join_size: int
     sql_sha1: str
 
 
 FROM_RE = re.compile(r"\bFROM\b(.*?)(\bWHERE\b|;|\Z)", flags=re.IGNORECASE | re.DOTALL)
-SELECT5_HEADER_RE = re.compile(r"^--\s*query\s+(\d+)\s+\((.*?)\)\s*$", flags=re.IGNORECASE)
 
 
 def strip_line_comments(sql: str) -> str:
@@ -80,70 +78,11 @@ def build_file_dataset(dataset: str, files: list[Path]) -> list[QueryEntry]:
                 dataset=dataset,
                 query_id=p.stem,
                 query_path=rel,
-                query_label="",
                 join_size=join_size,
                 sql_sha1=sha1_hex(canonical_sql(sql)),
             )
         )
     return out
-
-
-def parse_select5(sql_path: Path) -> list[QueryEntry]:
-    # Parse sqlite/queries/select5.sql which has the form:
-    #   -- query 0001 (join-4-1)
-    #   SELECT ...;
-    #   <blank line>
-    entries: list[QueryEntry] = []
-
-    cur_id: Optional[str] = None
-    cur_label: str = ""
-    cur_lines: list[str] = []
-
-    def flush():
-        nonlocal cur_id, cur_label, cur_lines
-        if cur_id is None:
-            return
-        sql = "\n".join(cur_lines).strip()
-        if not sql:
-            raise SystemExit(f"[sqlite_select5] empty SQL for query {cur_id}")
-        join_size = join_size_from_sql(sql)
-        if join_size is None:
-            raise SystemExit(f"[sqlite_select5] failed to parse join_size for query {cur_id}")
-        entries.append(
-            QueryEntry(
-                dataset="sqlite_select5",
-                query_id=cur_id,
-                query_path=sql_path.relative_to(REPO_ROOT).as_posix(),
-                query_label=cur_label,
-                join_size=join_size,
-                sql_sha1=sha1_hex(canonical_sql(sql)),
-            )
-        )
-        cur_id = None
-        cur_label = ""
-        cur_lines = []
-
-    for raw in sql_path.read_text(errors="ignore").splitlines():
-        m = SELECT5_HEADER_RE.match(raw.strip())
-        if m:
-            flush()
-            cur_id = m.group(1).zfill(4)
-            cur_label = m.group(2).strip()
-            continue
-        if cur_id is None:
-            continue
-        # Keep original SQL formatting (hash canonicalization normalizes it anyway).
-        if raw.lstrip().startswith("--"):
-            continue
-        cur_lines.append(raw)
-        if "\n".join(cur_lines).strip().endswith(";"):
-            flush()
-
-    flush()
-
-    # Sort by query_id numeric.
-    entries.sort(key=lambda e: int(e.query_id))
-    return entries
 
 
 def print_summary(entries: list[QueryEntry]) -> None:
@@ -215,7 +154,10 @@ def main() -> None:
         "job_complex",
         list(iter_sql_files((REPO_ROOT / "JOB-Complex" / "queries").glob("*.sql"))),
     )
-    datasets += parse_select5(REPO_ROOT / "sqlite" / "queries" / "select5.sql")
+    datasets += build_file_dataset(
+        "sqlite_select5",
+        list(iter_sql_files((REPO_ROOT / "sqlite" / "queries" / "select5").glob("*.sql"))),
+    )
 
     for ds_id, rel_path in [
         ("gpuqo_chain_small", "postgres-gpuqo/scripts/databases/chain-small/queries"),
@@ -233,9 +175,9 @@ def main() -> None:
     with out_path.open("w", newline="") as f:
         # Use LF line endings for stable diffs across platforms/tools.
         w = csv.writer(f, lineterminator="\n")
-        w.writerow(["dataset", "query_id", "query_path", "query_label", "join_size", "sql_sha1"])
+        w.writerow(["dataset", "query_id", "query_path", "join_size", "sql_sha1"])
         for e in datasets:
-            w.writerow([e.dataset, e.query_id, e.query_path, e.query_label, str(e.join_size), e.sql_sha1])
+            w.writerow([e.dataset, e.query_id, e.query_path, str(e.join_size), e.sql_sha1])
 
     if args.summary:
         print_summary(datasets)

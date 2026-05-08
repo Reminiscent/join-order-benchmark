@@ -84,6 +84,6 @@ layout, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
 | `examples/` | default extra variant definitions |
 | `tools/` | query manifest and reviewer-table helpers |
 | `tests/` | harness and reviewer-table tests |
-| workload directories | JOB, JOB-Complex, CEB IMDB 3k, SQLite select5, and GPUQO-derived workloads |
+| workload directories | built-in SQL workloads and dataset load scripts |
 | `data/` | ignored local input data, commonly the external IMDB CSV bundle |
 | `outputs/` | ignored local benchmark output directories |

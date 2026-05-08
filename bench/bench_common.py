@@ -27,7 +27,6 @@ class QueryMeta:
     dataset: str
     query_id: str
     query_path: str
-    query_label: str
     join_size: int
 
 

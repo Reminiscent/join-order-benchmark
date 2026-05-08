@@ -21,7 +21,6 @@ class BenchResultsTests(unittest.TestCase):
             dataset="job",
             query_id="q1",
             query_path="job/q1.sql",
-            query_label="Q1",
             join_size=4,
         )
         spec = ResolvedDatasetRun(

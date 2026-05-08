@@ -156,10 +156,10 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
 
     def test_select_queries_filters_by_min_join(self) -> None:
         queries = [
-            QueryMeta("job", "q10", "job/q10.sql", "Q10", 10),
-            QueryMeta("job", "q12", "job/q12.sql", "Q12", 12),
-            QueryMeta("job", "q14", "job/q14.sql", "Q14", 14),
-            QueryMeta("job", "q16", "job/q16.sql", "Q16", 16),
+            QueryMeta("job", "q10", "job/q10.sql", 10),
+            QueryMeta("job", "q12", "job/q12.sql", 12),
+            QueryMeta("job", "q14", "job/q14.sql", 14),
+            QueryMeta("job", "q16", "job/q16.sql", 16),
         ]
         spec = ResolvedDatasetRun(
             dataset="job",

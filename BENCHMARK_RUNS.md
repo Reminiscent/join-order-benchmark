@@ -34,9 +34,8 @@ loads the datasets selected by the scenario.  For `main`, both `job` and
 and reused by both query suites.
 
 IMDB-backed datasets require `--csv-dir` because the CSV bundle is not vendored
-here.  Self-contained datasets, such as SQLite select5 and GPUQO small
-workloads, load local SQL files.  To reuse existing data, skip `prepare` and run
-the benchmark directly.
+here.  Self-contained planning datasets load local SQL files.  To reuse
+existing data, skip `prepare` and run the benchmark directly.
 
 Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 

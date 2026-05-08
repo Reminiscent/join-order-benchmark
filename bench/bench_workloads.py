@@ -31,14 +31,6 @@ from bench_common import (
 )
 
 
-WRAP_COUNT_DATASETS = {
-    "sqlite_select5",
-    "gpuqo_chain_small",
-    "gpuqo_clique_small",
-    "gpuqo_star_small",
-    "gpuqo_snowflake_small",
-}
-
 IMDB_DATASETS = {"job", "job_complex", "imdb_ceb_3k"}
 
 DEFAULT_DB_BY_DATASET = {
@@ -52,7 +44,6 @@ DEFAULT_DB_BY_DATASET = {
     "gpuqo_snowflake_small": "gpuqo_snowflake_small_bench",
 }
 
-SELECT5_HEADER_RE = re.compile(r"^--\s*query\s+(\d+)\s+\((.*?)\)\s*$", flags=re.IGNORECASE)
 DEFAULT_VARIANTS_FILE = REPO_ROOT / "examples" / "variants.toml"
 
 DEFAULT_SCENARIO_VARIANTS = ("dp", "geqo")
@@ -277,7 +268,6 @@ def load_manifest_by_dataset() -> dict[str, tuple[QueryMeta, ...]]:
                 dataset=row["dataset"],
                 query_id=row["query_id"],
                 query_path=row["query_path"],
-                query_label=row.get("query_label", "") or "",
                 join_size=join_size,
             )
             out.setdefault(q.dataset, []).append(q)
@@ -325,54 +315,10 @@ def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
 def load_sql_for_query(query: QueryMeta) -> str:
     """Load the SQL text for a manifest query entry."""
 
-    if query.dataset == "sqlite_select5":
-        sql = parse_select5_queries().get(query.query_id)
-        if sql is None:
-            die(f"missing sqlite_select5 query_id={query.query_id} in sqlite/queries/select5.sql")
-        return sql
-
     path = REPO_ROOT / query.query_path
     if not path.is_file():
         die(f"missing query file: {path}")
     return path.read_text(errors="ignore")
-
-
-@functools.lru_cache(maxsize=1)
-def parse_select5_queries() -> dict[str, str]:
-    """Parse the combined sqlite select5 SQL file into query_id -> SQL text."""
-
-    sql_path = REPO_ROOT / "sqlite" / "queries" / "select5.sql"
-    queries: dict[str, str] = {}
-    cur_id: Optional[str] = None
-    cur_lines: list[str] = []
-
-    def flush() -> None:
-        nonlocal cur_id, cur_lines
-        if cur_id is None:
-            return
-        sql = "\n".join(cur_lines).strip()
-        if not sql:
-            die(f"empty SQL in {sql_path} for query {cur_id}")
-        queries[cur_id] = sql
-        cur_id = None
-        cur_lines = []
-
-    for raw in sql_path.read_text(errors="ignore").splitlines():
-        m = SELECT5_HEADER_RE.match(raw.strip())
-        if m:
-            flush()
-            cur_id = m.group(1).zfill(4)
-            continue
-        if cur_id is None:
-            continue
-        if raw.lstrip().startswith("--"):
-            continue
-        cur_lines.append(raw)
-        if "\n".join(cur_lines).strip().endswith(";"):
-            flush()
-
-    flush()
-    return queries
 
 
 # SQL statement shaping.
@@ -398,7 +344,7 @@ def ensure_semicolon(sql: str) -> str:
 def build_statement(dataset: str, sql: str) -> str:
     """Build the SQL text that the runner sends to EXPLAIN ANALYZE."""
 
-    if dataset in WRAP_COUNT_DATASETS:
+    if dataset in PLANNING_DATASETS:
         inner = strip_trailing_semicolon_and_comment(sql)
         return f"SELECT count(*) FROM ({inner}) q;"
     return ensure_semicolon(sql)

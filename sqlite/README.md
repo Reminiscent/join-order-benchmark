@@ -22,8 +22,11 @@ sqllogictest/logictest version in `select5.sqlite.test`.
   Creates tables `t1` through `t64`.
 - `load.sql`
   Loads deterministic toy data.
+- `queries/select5/`
+  Converted PostgreSQL per-query SQL files.
 - `queries/select5.sql`
-  Converted PostgreSQL query file.
+  psql include file for running all query files manually.  Benchmark runs read
+  the per-query files through `tools/query_manifest.csv`.
 - `select5.test`
   PostgreSQL entry file for the whole workload.
 - `select5.sqlite.test`
