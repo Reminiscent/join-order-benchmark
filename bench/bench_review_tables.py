@@ -36,8 +36,19 @@ PUBLIC_LABELS = {
     "goo_combined": "GOO(combined)",
     "hybrid_search": "Hybrid Search",
 }
+RATIO_STYLE_KEYS = {
+    "ratio_fast_strong",
+    "ratio_fast",
+    "ratio_neutral",
+    "ratio_slow",
+    "ratio_slower",
+    "ratio_worst",
+}
 
 RatioPair = tuple[str, str]
+
+
+# Parsed CSV rows and in-memory review table model.
 
 
 @dataclass(frozen=True)
@@ -55,6 +66,7 @@ class SummaryRow:
     plan_total_cost_median: float | None
 
     def metric_value(self, column: str) -> float | None:
+        """Return one validated metric column from this summary row."""
         return getattr(self, column)
 
 
@@ -71,7 +83,6 @@ class ReviewTableRow:
     join_size: int
     values: dict[str, ReviewTableCell]
     ratios: dict[RatioPair, ReviewTableCell]
-    family_start: bool = False
 
 
 @dataclass(frozen=True)
@@ -91,7 +102,15 @@ class ReviewTable:
     total_ratios: dict[RatioPair, ReviewTableCell]
 
 
+# CSV loading and display labels.
+
+
 def maybe_float(raw: str) -> float | None:
+    """Parse an optional float field from ``summary.csv``.
+
+    Empty fields represent unavailable metrics, usually because the query did
+    not complete successfully.
+    """
     text = raw.strip()
     if not text:
         return None
@@ -99,10 +118,21 @@ def maybe_float(raw: str) -> float | None:
 
 
 def public_label(variant: str, label_by_name: dict[str, str]) -> str:
+    """Resolve the reviewer-facing label for a variant name.
+
+    Built-in labels win, then the run metadata label, then the raw variant name.
+    """
     return PUBLIC_LABELS.get(variant, label_by_name.get(variant, variant))
 
 
-def load_summary_rows(summary_path: Path) -> tuple[dict[str, dict[str, dict[str, SummaryRow]]], dict[str, list[str]]]:
+def load_summary_rows(
+    summary_path: Path,
+) -> tuple[dict[str, dict[str, dict[str, SummaryRow]]], dict[str, list[str]]]:
+    """Load ``summary.csv`` into dataset/variant/query indexes.
+
+    The returned query order preserves first appearance per dataset so the
+    workbook can later sort only for presentation.
+    """
     rows: dict[str, dict[str, dict[str, SummaryRow]]] = {}
     query_order: dict[str, list[str]] = {}
     with summary_path.open(newline="") as f:
@@ -148,7 +178,11 @@ def load_summary_rows(summary_path: Path) -> tuple[dict[str, dict[str, dict[str,
     return rows, query_order
 
 
+# Ordering, metric extraction, and ratio calculation.
+
+
 def natural_key(text: str) -> list[object]:
+    """Build a natural-sort key so query ids like ``2a`` sort before ``10a``."""
     parts = re.split(r"(\d+)", text)
     out: list[object] = []
     for part in parts:
@@ -158,12 +192,8 @@ def natural_key(text: str) -> list[object]:
     return out
 
 
-def query_family(query_id: str) -> str:
-    match = re.match(r"(\d+)", query_id)
-    return match.group(1) if match else query_id
-
-
 def ratio_style_key(value: float | None) -> str:
+    """Classify a direct variant/reference ratio into a workbook color bucket."""
     if value is None:
         return "missing"
     if value < 0.5:
@@ -180,12 +210,17 @@ def ratio_style_key(value: float | None) -> str:
 
 
 def metric_value(row: SummaryRow | None, metric_column: str) -> float | None:
+    """Return the metric for a completed query row.
+
+    Rows without successful repetitions are hidden from totals and ratios.
+    """
     if row is None or row.ok_reps <= 0:
         return None
     return row.metric_value(metric_column)
 
 
 def ratio_to_reference(value: float | None, reference_value: float | None) -> float | None:
+    """Compute ``variant/reference`` when both values are comparable."""
     if value is None or reference_value is None:
         return None
     if reference_value <= 0:
@@ -193,11 +228,20 @@ def ratio_to_reference(value: float | None, reference_value: float | None) -> fl
     return value / reference_value
 
 
+# Variant order and reference selection.
+
+
 def resolve_ratio_references(variants: tuple[str, ...]) -> tuple[str, ...]:
+    """Use selected built-in references only when they were part of the run."""
     return tuple(variant for variant in REFERENCE_VARIANTS if variant in variants)
 
 
 def build_ratio_pairs(variants: tuple[str, ...], references: tuple[str, ...]) -> tuple[RatioPair, ...]:
+    """Build reviewer comparison pairs.
+
+    Each non-reference variant is compared against every selected reference;
+    references are not compared with each other.
+    """
     reference_set = set(references)
     return tuple(
         (variant, reference)
@@ -208,6 +252,7 @@ def build_ratio_pairs(variants: tuple[str, ...], references: tuple[str, ...]) ->
 
 
 def first_row_for_query(dataset_rows: dict[str, dict[str, SummaryRow]], query_id: str) -> SummaryRow | None:
+    """Find any variant row for a query to recover shared query metadata."""
     for rows_by_query in dataset_rows.values():
         row = rows_by_query.get(query_id)
         if row is not None:
@@ -222,6 +267,11 @@ def resolve_combined_variant_order(
     selected_datasets: list[str],
     variants_csv: Optional[str],
 ) -> tuple[str, ...]:
+    """Resolve the displayed variant order for combined datasets.
+
+    An explicit CLI order wins; otherwise ``run.json`` order is used before
+    falling back to variants discovered in ``summary.csv``.
+    """
     if variants_csv:
         variants = tuple(parse_csv_list(variants_csv))
     else:
@@ -249,12 +299,16 @@ def resolve_combined_variant_order(
 
 
 def label_map(run_context: dict[str, Any], variants: tuple[str, ...]) -> dict[str, str]:
+    """Build the final display label map for selected variants."""
     labels = {
         str(entry.get("name")): str(entry.get("label") or entry.get("name"))
         for entry in run_context.get("variants", [])
         if isinstance(entry, dict) and entry.get("name")
     }
     return {variant: public_label(variant, labels) for variant in variants}
+
+
+# Review table construction.
 
 
 def build_review_table(
@@ -266,6 +320,11 @@ def build_review_table(
     metric: str,
     variants_csv: Optional[str],
 ) -> ReviewTable:
+    """Construct one metric-specific review table from loaded run results.
+
+    This is the main data-shaping step: it aligns datasets, variants, values,
+    per-query ratios, and comparable-row totals before rendering.
+    """
     missing_datasets = [dataset for dataset in datasets if dataset not in rows_by_dataset]
     if missing_datasets:
         raise SystemExit(f"run summary does not contain dataset(s): {', '.join(missing_datasets)}")
@@ -285,12 +344,9 @@ def build_review_table(
     labels = label_map(run_context, variants)
 
     rows: list[ReviewTableRow] = []
-    previous_dataset = ""
-    previous_family = ""
     for dataset in datasets:
         dataset_rows = rows_by_dataset[dataset]
         query_ids = sorted(query_order[dataset], key=natural_key)
-        previous_family = ""
         for query_id in query_ids:
             sample = first_row_for_query(dataset_rows, query_id)
             if sample is None:
@@ -307,7 +363,6 @@ def build_review_table(
                 ratio = ratio_to_reference(values[variant].raw, reference_value)
                 ratios[(variant, reference)] = ReviewTableCell(raw=ratio, style_key=ratio_style_key(ratio))
 
-            family = query_family(query_id)
             rows.append(
                 ReviewTableRow(
                     dataset=dataset,
@@ -315,14 +370,8 @@ def build_review_table(
                     join_size=sample.join_size,
                     values=values,
                     ratios=ratios,
-                    family_start=bool(
-                        (previous_dataset and dataset != previous_dataset)
-                        or (previous_family and family != previous_family)
-                    ),
                 )
             )
-            previous_dataset = dataset
-            previous_family = family
 
     total_values: dict[str, ReviewTableCell] = {}
     for variant in variants:
@@ -358,7 +407,11 @@ def build_review_table(
     )
 
 
+# XLSX formatting helpers.
+
+
 def sheet_name(raw: str, used: set[str]) -> str:
+    """Sanitize and uniquify an Excel worksheet name."""
     base = re.sub(r"[][\\/*?:]", "_", raw).strip() or "sheet"
     base = base[:31]
     name = base
@@ -372,27 +425,19 @@ def sheet_name(raw: str, used: set[str]) -> str:
 
 
 def xlsx_format_key(cell: ReviewTableCell, *, total: bool = False) -> str:
+    """Map an internal cell style to the concrete XlsxWriter format key."""
     style_key = cell.style_key
     if style_key == "missing":
         return "missing"
-    if style_key == "ratio_fast_strong":
-        return "total_ratio_fast_strong" if total else "ratio_fast_strong"
-    if style_key == "ratio_fast":
-        return "total_ratio_fast" if total else "ratio_fast"
-    if style_key == "ratio_neutral":
-        return "total_ratio_neutral" if total else "ratio_neutral"
-    if style_key == "ratio_slower":
-        return "total_ratio_slower" if total else "ratio_slower"
-    if style_key == "ratio_slow":
-        return "total_ratio_slow" if total else "ratio_slow"
-    if style_key == "ratio_worst":
-        return "total_ratio_worst" if total else "ratio_worst"
+    if style_key in RATIO_STYLE_KEYS:
+        return f"total_{style_key}" if total else style_key
     if style_key == "numeric":
         return "total_numeric" if total else "numeric"
     return "total_text" if total else "text"
 
 
 def xlsx_formats(workbook: Any) -> dict[str, Any]:
+    """Create all workbook formats used by review worksheets."""
     border = {
         "border": 1,
         "border_color": "#D1D5DB",
@@ -454,6 +499,7 @@ def write_or_merge(
     value: object,
     cell_format: Any,
 ) -> None:
+    """Write a value, using an Excel merge only when the target spans cells."""
     if first_row == last_row and first_col == last_col:
         worksheet.write(first_row, first_col, value, cell_format)
     else:
@@ -461,6 +507,7 @@ def write_or_merge(
 
 
 def write_cell(worksheet: Any, row: int, col: int, value: object | None, cell_format: Any) -> None:
+    """Write one cell while preserving numeric types for Excel formulas/sorting."""
     if value is None or value == "":
         worksheet.write_blank(row, col, None, cell_format)
     elif isinstance(value, (int, float)):
@@ -470,6 +517,7 @@ def write_cell(worksheet: Any, row: int, col: int, value: object | None, cell_fo
 
 
 def require_xlsxwriter() -> Any:
+    """Load the optional XlsxWriter dependency with a stable CLI error."""
     try:
         import xlsxwriter
     except ModuleNotFoundError as exc:
@@ -477,7 +525,11 @@ def require_xlsxwriter() -> Any:
     return xlsxwriter
 
 
+# XLSX workbook rendering.
+
+
 def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) -> None:
+    """Render one ``ReviewTable`` into a single workbook worksheet."""
     formats = xlsx_formats(workbook)
     query_cols = 3
     value_start = query_cols
@@ -581,6 +633,7 @@ def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) ->
 
 
 def write_review_workbook(path: Path, tables: list[ReviewTable]) -> None:
+    """Write all metric tables into one reviewer workbook."""
     if not tables:
         raise SystemExit("cannot write an empty workbook")
 
@@ -599,12 +652,16 @@ def write_review_workbook(path: Path, tables: list[ReviewTable]) -> None:
         workbook.close()
 
 
+# Public entry point used by the benchmark CLI/tooling.
+
+
 def write_review_tables(
     *,
     run_dir: Path,
     datasets: list[str],
     variants_csv: Optional[str] = None,
 ) -> list[Path]:
+    """Build the standard reviewer workbook for a benchmark run directory."""
     run_json = run_dir / "run.json"
     summary_csv = run_dir / "summary.csv"
     if not run_json.is_file():
