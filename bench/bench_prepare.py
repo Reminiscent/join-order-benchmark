@@ -12,7 +12,11 @@ from bench_workloads import dataset_prepare_scripts, resolve_prepare_dataset_run
 from bench_common import ConnOpts, Scenario, die, psql_file, psql_sql, sql_identifier, sql_literal
 
 
+# Database lifecycle helpers.
+
+
 def drop_and_create_db(db: str, conn: Optional[ConnOpts] = None) -> None:
+    """Terminate existing sessions, drop the target database, and recreate it."""
     ident = sql_identifier(db)
     script = "\n".join(
         [
@@ -27,12 +31,20 @@ def drop_and_create_db(db: str, conn: Optional[ConnOpts] = None) -> None:
     psql_sql("postgres", script, conn=conn, check=True)
 
 
+# Dataset and scenario preparation.
+
+
 def prepare_dataset(
     dataset: str,
     db: str,
     csv_dir: Optional[str],
     conn: Optional[ConnOpts] = None,
 ) -> None:
+    """Recreate one dataset database and run its schema/load/index scripts.
+
+    CSV-backed IMDB workloads require ``csv_dir``; self-contained SQL workloads
+    ignore it.
+    """
     schema_sql, load_sql, index_sql, needs_csv_dir = dataset_prepare_scripts(dataset)
     if needs_csv_dir and not csv_dir:
         die(f"dataset '{dataset}' requires --csv-dir /absolute/path/to/imdb_csv")
@@ -40,7 +52,8 @@ def prepare_dataset(
     print(f"[prepare] recreate dataset={dataset} db={db}")
     drop_and_create_db(db, conn)
     psql_file(db, schema_sql, conn=conn, check=True)
-    psql_file(db, load_sql, conn=conn, vars=({"csv_dir": csv_dir} if csv_dir else None), check=True)
+    load_vars = {"csv_dir": csv_dir} if csv_dir else None
+    psql_file(db, load_sql, conn=conn, vars=load_vars, check=True)
     if index_sql is not None:
         psql_file(db, index_sql, conn=conn, check=True)
 
@@ -51,6 +64,11 @@ def prepare_scenario(
     csv_dir: Optional[str],
     conn: Optional[ConnOpts],
 ) -> None:
+    """Prepare every distinct database required by a scenario.
+
+    Several IMDB datasets share one physical database, so duplicate database
+    names are skipped after the first recreate/load pass.
+    """
     resolved = resolve_prepare_dataset_runs(scenario)
 
     recreated_dbs: set[str] = set()

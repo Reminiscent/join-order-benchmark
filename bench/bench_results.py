@@ -15,22 +15,53 @@ from typing import Any
 from bench_workloads import select_queries
 
 
+RAW_CSV_FIELDS = [
+    "dataset",
+    "query_id",
+    "variant",
+    "rep",
+    "planning_ms",
+    "execution_ms",
+    "total_ms",
+    "plan_total_cost",
+    "status",
+    "error",
+]
+
+SUMMARY_METRIC_FIELDS = (
+    ("planning_ms_median", "planning_ms"),
+    ("execution_ms_median", "execution_ms"),
+    ("total_ms_median", "total_ms"),
+    ("plan_total_cost_median", "plan_total_cost"),
+)
+SUMMARY_CSV_FIELDS = [
+    "dataset",
+    "query_id",
+    "join_size",
+    "variant",
+    "planning_ms_median",
+    "execution_ms_median",
+    "total_ms_median",
+    "plan_total_cost_median",
+    "ok_reps",
+    "timeout_reps",
+    "error_reps",
+]
+
+
+# CSV artifact writers.
+
+
 def write_raw_csv(raw_path: Path, raw_rows: list[dict[str, str]]) -> None:
+    """Write per-repetition execution rows to ``raw.csv``.
+
+    Extra keys are ignored so execution code can carry richer in-memory rows
+    without changing the public CSV schema.
+    """
     with raw_path.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=[
-                "dataset",
-                "query_id",
-                "variant",
-                "rep",
-                "planning_ms",
-                "execution_ms",
-                "total_ms",
-                "plan_total_cost",
-                "status",
-                "error",
-            ],
+            fieldnames=RAW_CSV_FIELDS,
             lineterminator="\n",
             extrasaction="ignore",
         )
@@ -44,22 +75,15 @@ def write_summary_csv(
     resolved_runs: list[Any],
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]],
 ) -> None:
+    """Write one median/failure-count row per dataset/query/variant.
+
+    Only successful repetitions contribute metric medians; timeout and error
+    repetitions are counted separately for diagnostics.
+    """
     with summary_path.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
-            fieldnames=[
-                "dataset",
-                "query_id",
-                "join_size",
-                "variant",
-                "planning_ms_median",
-                "execution_ms_median",
-                "total_ms_median",
-                "plan_total_cost_median",
-                "ok_reps",
-                "timeout_reps",
-                "error_reps",
-            ],
+            fieldnames=SUMMARY_CSV_FIELDS,
             lineterminator="\n",
         )
         writer.writeheader()
@@ -73,39 +97,28 @@ def write_summary_csv(
                     ok_reps = len(ok)
                     timeout_reps = sum(1 for entry in vals if entry["status"] == "timeout")
                     error_reps = sum(1 for entry in vals if entry["status"] == "error")
+                    row = {
+                        "dataset": spec.dataset,
+                        "query_id": q.query_id,
+                        "join_size": str(q.join_size),
+                        "variant": variant_name,
+                        "ok_reps": str(ok_reps),
+                        "timeout_reps": str(timeout_reps),
+                        "error_reps": str(error_reps),
+                    }
                     if ok:
-                        planning_vals = [float(entry["planning_ms"]) for entry in ok]
-                        execution_vals = [float(entry["execution_ms"]) for entry in ok]
-                        total_vals = [float(entry["total_ms"]) for entry in ok]
-                        cost_vals = [float(entry["plan_total_cost"]) for entry in ok]
-                        row = {
-                            "dataset": spec.dataset,
-                            "query_id": q.query_id,
-                            "join_size": str(q.join_size),
-                            "variant": variant_name,
-                            "planning_ms_median": f"{statistics.median(planning_vals):.3f}",
-                            "execution_ms_median": f"{statistics.median(execution_vals):.3f}",
-                            "total_ms_median": f"{statistics.median(total_vals):.3f}",
-                            "plan_total_cost_median": f"{statistics.median(cost_vals):.3f}",
-                            "ok_reps": str(ok_reps),
-                            "timeout_reps": str(timeout_reps),
-                            "error_reps": str(error_reps),
-                        }
+                        row.update(
+                            {
+                                summary_field: f"{statistics.median(float(entry[source_field]) for entry in ok):.3f}"
+                                for summary_field, source_field in SUMMARY_METRIC_FIELDS
+                            }
+                        )
                     else:
-                        row = {
-                            "dataset": spec.dataset,
-                            "query_id": q.query_id,
-                            "join_size": str(q.join_size),
-                            "variant": variant_name,
-                            "planning_ms_median": "",
-                            "execution_ms_median": "",
-                            "total_ms_median": "",
-                            "plan_total_cost_median": "",
-                            "ok_reps": "0",
-                            "timeout_reps": str(timeout_reps),
-                            "error_reps": str(error_reps),
-                        }
+                        row.update({summary_field: "" for summary_field, _ in SUMMARY_METRIC_FIELDS})
                     writer.writerow(row)
+
+
+# run.json artifact helpers.
 
 
 def build_run_context(
@@ -120,6 +133,7 @@ def build_run_context(
     dataset_contexts: list[dict[str, Any]],
     stats_refresh: str,
 ) -> dict[str, Any]:
+    """Build the serializable ``run.json`` metadata for one benchmark run."""
     run_context = {
         "run_id": run_id,
         "scenario": scenario.name,
@@ -148,4 +162,5 @@ def build_run_context(
 
 
 def write_run_context(path: Path, run_context: dict[str, Any]) -> None:
+    """Write ``run.json`` with stable indentation and key ordering."""
     path.write_text(json.dumps(run_context, indent=2, sort_keys=True) + "\n")
