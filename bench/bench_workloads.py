@@ -113,6 +113,8 @@ def built_in_scenario(
     description: str,
     datasets: tuple[str, ...],
 ) -> Scenario:
+    """Create a built-in scenario with the repository-wide default run settings."""
+
     return Scenario(
         name=name,
         description=description,
@@ -124,6 +126,8 @@ def built_in_scenario(
 
 
 def resolve_variants_file(path: Optional[Path] = None) -> Optional[Path]:
+    """Resolve an explicit variants file or the default examples/variants.toml."""
+
     if path is not None:
         return Path(path)
     if DEFAULT_VARIANTS_FILE.is_file():
@@ -132,6 +136,8 @@ def resolve_variants_file(path: Optional[Path] = None) -> Optional[Path]:
 
 
 def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
+    """Load built-in variants plus any extra variants from a TOML file."""
+
     out = {variant.name: variant for variant in BUILT_IN_VARIANTS}
     variants_path = resolve_variants_file(path)
     if variants_path is None:
@@ -170,6 +176,8 @@ def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
 
 
 def load_scenarios() -> dict[str, Scenario]:
+    """Return the public scenario registry used by the CLI."""
+
     scenarios = (
         built_in_scenario(
             name="main",
@@ -195,6 +203,8 @@ def resolve_variant_names(
     variants: dict[str, Variant],
     override_csv: Optional[str],
 ) -> tuple[str, ...]:
+    """Resolve the effective variant order for a scenario run."""
+
     names = tuple(parse_csv_list(override_csv)) if override_csv else scenario.default_variants
     if not names:
         die(f"scenario '{scenario.name}' does not define default_variants and no --variants were provided")
@@ -209,6 +219,8 @@ def resolve_dataset_runs(
     variant_names: tuple[str, ...],
     min_join: Optional[int] = None,
 ) -> list[ResolvedDatasetRun]:
+    """Expand a scenario into concrete dataset/database/variant run specs."""
+
     resolved: list[ResolvedDatasetRun] = []
 
     for dataset in scenario.datasets:
@@ -229,6 +241,8 @@ def resolve_dataset_runs(
 def resolve_prepare_dataset_runs(
     scenario: Scenario,
 ) -> list[ResolvedDatasetRun]:
+    """Resolve scenario datasets that must be prepared before a run."""
+
     known_datasets = set(available_datasets())
     datasets = list(dict.fromkeys(scenario.datasets))
 
@@ -248,6 +262,8 @@ def resolve_prepare_dataset_runs(
 
 @functools.lru_cache(maxsize=1)
 def load_manifest_by_dataset() -> dict[str, tuple[QueryMeta, ...]]:
+    """Load tools/query_manifest.csv grouped by dataset."""
+
     if not MANIFEST_PATH.is_file():
         die(f"missing manifest: {MANIFEST_PATH} (run python3 tools/build_query_manifest.py --verify --summary)")
 
@@ -276,10 +292,14 @@ def load_manifest_by_dataset() -> dict[str, tuple[QueryMeta, ...]]:
 
 
 def available_datasets() -> tuple[str, ...]:
+    """Return dataset names available in the checked-in query manifest."""
+
     return tuple(sorted(load_manifest_by_dataset().keys()))
 
 
 def parse_manifest(dataset: str) -> list[QueryMeta]:
+    """Return manifest entries for one dataset."""
+
     manifest = load_manifest_by_dataset()
     if dataset not in manifest:
         die(f"unknown dataset '{dataset}'")
@@ -288,6 +308,8 @@ def parse_manifest(dataset: str) -> list[QueryMeta]:
 
 @functools.lru_cache(maxsize=1)
 def parse_select5_queries() -> dict[str, str]:
+    """Parse the combined sqlite select5 SQL file into query_id -> SQL text."""
+
     sql_path = REPO_ROOT / "sqlite" / "queries" / "select5.sql"
     queries: dict[str, str] = {}
     cur_id: Optional[str] = None
@@ -323,12 +345,16 @@ def parse_select5_queries() -> dict[str, str]:
 
 
 def strip_trailing_semicolon_and_comment(sql: str) -> str:
+    """Remove a final semicolon and trailing SQL comment from a statement."""
+
     s = sql.strip()
     s = re.sub(r";\s*(--.*)?\s*\Z", "", s, flags=re.DOTALL)
     return s.strip()
 
 
 def ensure_semicolon(sql: str) -> str:
+    """Ensure a SQL statement ends with a semicolon."""
+
     s = sql.strip()
     if not s.endswith(";"):
         return s + ";"
@@ -336,6 +362,8 @@ def ensure_semicolon(sql: str) -> str:
 
 
 def build_statement(dataset: str, sql: str) -> str:
+    """Build the SQL text that the runner sends to EXPLAIN ANALYZE."""
+
     if dataset in WRAP_COUNT_DATASETS:
         inner = strip_trailing_semicolon_and_comment(sql)
         return f"SELECT count(*) FROM ({inner}) q;"
@@ -343,12 +371,16 @@ def build_statement(dataset: str, sql: str) -> str:
 
 
 def dataset_db_name(dataset: str) -> str:
+    """Return the default PostgreSQL database name for a dataset."""
+
     if dataset not in DEFAULT_DB_BY_DATASET:
         die(f"no default benchmark database configured for dataset '{dataset}'")
     return DEFAULT_DB_BY_DATASET[dataset]
 
 
 def dataset_prepare_scripts(dataset: str) -> tuple[Path, Path, Optional[Path], bool]:
+    """Return schema/load/index script paths and CSV requirement for preparation."""
+
     if dataset in IMDB_DATASETS:
         return (
             REPO_ROOT / "join-order-benchmark" / "schema.sql",
@@ -374,6 +406,8 @@ def dataset_prepare_scripts(dataset: str) -> tuple[Path, Path, Optional[Path], b
 
 
 def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
+    """Select manifest queries for a run spec, applying any min_join filter."""
+
     queries = parse_manifest(spec.dataset)
     if spec.min_join is not None:
         queries = [q for q in queries if q.join_size >= spec.min_join]
@@ -386,6 +420,8 @@ def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
 
 
 def load_sql_for_query(query: QueryMeta) -> str:
+    """Load the SQL text for a manifest query entry."""
+
     if query.dataset == "sqlite_select5":
         sql = parse_select5_queries().get(query.query_id)
         if sql is None:
