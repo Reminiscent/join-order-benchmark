@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+"""Command-line entry point for the PostgreSQL join-order benchmark harness.
+
+It parses user commands, resolves scenarios/variants/datasets, and delegates
+database setup or execution to the narrower ``bench_*`` modules.
+"""
 
 from __future__ import annotations
 
@@ -25,8 +30,13 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     scenarios = args._scenarios
-    conn = ConnOpts(host=getattr(args, "host", None), port=getattr(args, "port", None), user=getattr(args, "user", None))
+    conn = ConnOpts(
+        host=getattr(args, "host", None),
+        port=getattr(args, "port", None),
+        user=getattr(args, "user", None),
+    )
 
+    # Discovery commands are read-only; they should not connect to benchmark databases.
     if args.cmd == "list":
         if args.what == "scenarios":
             print_scenarios(scenarios)
@@ -46,6 +56,7 @@ def main() -> None:
         die(f"unknown scenario '{scenario_name}' (see: python3 bench/bench.py list scenarios)")
     scenario = scenarios[scenario_name]
 
+    # Prepare materializes the databases required by the selected scenario.
     if args.cmd == "prepare":
         prepare_scenario(
             scenario,
@@ -56,6 +67,8 @@ def main() -> None:
         return
 
     if args.cmd == "run":
+        # The run path resolves optional CLI overrides before handing execution
+        # to bench_run.py, which owns SQL execution and artifact writing.
         variants = load_variants(args.variants_file)
         variant_names = resolve_variant_names(scenario, variants, args.variants)
         resolved_runs = resolve_dataset_runs(
@@ -83,6 +96,8 @@ def main() -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    # Load scenarios during parser construction so list/help validation and
+    # command execution share the same scenario registry.
     scenarios = load_scenarios()
 
     ap = argparse.ArgumentParser(description="Scenario-driven join-order benchmark harness (PostgreSQL).")
@@ -139,6 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def positive_int(raw: str) -> int:
+    """argparse type for positive integer options such as --min-join."""
+
     try:
         value = int(raw)
     except ValueError as e:
@@ -149,6 +166,8 @@ def positive_int(raw: str) -> int:
 
 
 def display_path(path: Path) -> str:
+    """Render paths relative to the repository root when possible."""
+
     try:
         return str(path.resolve().relative_to(REPO_ROOT))
     except ValueError:
@@ -156,6 +175,8 @@ def display_path(path: Path) -> str:
 
 
 def print_scenarios(scenarios: dict[str, Scenario]) -> None:
+    """Print scenario names, their datasets, and short descriptions."""
+
     print("Scenarios")
     print("name\tdatasets\tdescription")
     for name, scenario in scenarios.items():
@@ -169,6 +190,8 @@ def print_variants(
     variants: dict[str, Variant],
     variants_file: Path | None = None,
 ) -> None:
+    """Print built-in and extra variants visible to the CLI."""
+
     built_in_names = {variant.name for variant in BUILT_IN_VARIANTS}
     print("Variants")
     if variants_file is not None:
@@ -187,6 +210,8 @@ def print_variants(
 
 
 def print_datasets() -> None:
+    """Print manifest datasets and their default benchmark database names."""
+
     print("Datasets")
     print("name\tdatabase")
     for dataset in available_datasets():

@@ -1,10 +1,7 @@
 """PostgreSQL execution helpers for benchmark runs.
 
-``run_one_statement()`` is the primary entry point: it creates a clean session
-prelude, runs one measured ``EXPLAIN ANALYZE`` statement, and returns the
-timing/cost fields consumed by ``bench_run.py``.  The remaining helpers
-validate the PostgreSQL execution environment, stabilize database statistics,
-and parse ``psql`` output.
+This module owns per-statement session setup, ``EXPLAIN ANALYZE`` execution,
+GUC validation, statistics refresh, and parsing of ``psql`` output.
 """
 
 from __future__ import annotations

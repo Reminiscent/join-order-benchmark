@@ -1,3 +1,9 @@
+"""Reviewer-facing table generation for benchmark outputs.
+
+This module reads ``summary.csv`` and ``run.json`` and renders compact metric
+and ratio tables, including the optional XLSX workbook.
+"""
+
 from __future__ import annotations
 
 import csv

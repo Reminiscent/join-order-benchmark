@@ -1,3 +1,9 @@
+"""Shared dataclasses, paths, and subprocess helpers for the benchmark harness.
+
+The other ``bench_*`` modules import these primitives instead of duplicating
+connection handling, SQL quoting, and artifact-name logic.
+"""
+
 from __future__ import annotations
 
 import re

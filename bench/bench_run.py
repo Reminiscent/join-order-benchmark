@@ -1,3 +1,9 @@
+"""Scenario runner for benchmark execution.
+
+This module coordinates statistics refresh, query selection, warmup/measured
+execution, timeout classification, and artifact flushing for one run.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

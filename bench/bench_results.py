@@ -1,3 +1,9 @@
+"""Artifact writers for benchmark run output.
+
+This module turns in-memory run rows into ``raw.csv``, ``summary.csv``, and
+``run.json`` so execution code does not own file-format details.
+"""
+
 from __future__ import annotations
 
 import csv

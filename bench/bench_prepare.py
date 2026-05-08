@@ -1,3 +1,9 @@
+"""Database preparation helpers for benchmark scenarios.
+
+This module creates or validates benchmark databases and runs the schema/load
+SQL scripts required before ``bench_run.py`` can execute queries.
+"""
+
 from __future__ import annotations
 
 from typing import Optional
