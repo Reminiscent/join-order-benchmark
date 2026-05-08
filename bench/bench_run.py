@@ -45,28 +45,33 @@ WARMUP_TIMEOUT_SKIP_PREFIX = "skipped measured run after warmup timeout:"
 
 @dataclass
 class RunState:
-    """Mutable rows and failure state for one benchmark run."""
+    """Mutable artifact rows and stop state for one benchmark run."""
 
-    # raw.csv contains measured rows only; warmup rows are tracked separately.
     raw_rows: list[dict[str, str]] = field(default_factory=list)
-    # summary.csv is regenerated from numeric accumulator rows on every flush.
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = field(default_factory=dict)
-    # Warmup failures are persisted in run.json for debugging skipped work.
+    # Warmup failures are not measured rows, but run.json records them.
     warmup_failures: list[dict[str, Any]] = field(default_factory=list)
-    # Query/variant pairs that timed out during warmup are skipped in measured reps.
     warmup_timeout_keys: set[tuple[str, str, str]] = field(default_factory=set)
-    # Non-timeout errors stop the run after the latest artifacts are written.
     termination: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
 class PreparedRunWork:
-    """Dataset work item after query SQL and variant objects are resolved."""
+    """One dataset's ready-to-run work bundle.
 
+    For example, running JOB with variants dp/geqo and queries 1a/2a creates
+    one PreparedRunWork:
+    - spec: JOB dataset/db/min_join plus the variant names ("dp", "geqo")
+    - selected_variants: the Variant objects for dp and geqo
+    - query_statements: query 1a SQL and query 2a SQL, ready for EXPLAIN
+    """
+
+    # Dataset, database, min_join, and variant-name choices for this run entry.
     spec: ResolvedDatasetRun
-    entry_variants: list[Variant]
-    # Each entry is the query metadata plus the final SQL statement to execute.
-    query_plans: list[tuple[QueryMeta, str]]
+    # Variant objects for spec.variants, preserving the requested order.
+    selected_variants: list[Variant]
+    # Selected queries paired with the SQL statement sent to PostgreSQL.
+    query_statements: list[tuple[QueryMeta, str]]
 
 
 # Scenario execution.
@@ -139,7 +144,7 @@ def run_scenario(
             processed_dbs.add(spec.db)
 
         queries = select_queries(spec)
-        query_plans = [(q, build_statement(spec.dataset, load_sql_for_query(q))) for q in queries]
+        query_statements = [(q, build_statement(spec.dataset, load_sql_for_query(q))) for q in queries]
         dataset_contexts.append(
             {
                 "dataset": spec.dataset,
@@ -148,16 +153,16 @@ def run_scenario(
             }
         )
         print(
-            f"[run] dataset={spec.dataset} db={spec.db} queries={len(query_plans)} "
+            f"[run] dataset={spec.dataset} db={spec.db} queries={len(query_statements)} "
             f"variants={','.join(spec.variants)} min_join={spec.min_join}"
         )
 
-        entry_variants = [variants_registry[name] for name in spec.variants]
+        selected_variants = [variants_registry[name] for name in spec.variants]
         prepared_runs.append(
             PreparedRunWork(
                 spec=spec,
-                entry_variants=entry_variants,
-                query_plans=query_plans,
+                selected_variants=selected_variants,
+                query_statements=query_statements,
             )
         )
 
@@ -183,7 +188,7 @@ def run_scenario(
     # Stage 5: execute warmup and measured groups.  Each measured repetition
     # runs all variants once for the same query, with the variant order rotated.
     for prepared in prepared_runs:
-        for query_idx, (query, stmt) in enumerate(prepared.query_plans):
+        for query_idx, (query, stmt) in enumerate(prepared.query_statements):
             for warmup_pass in range(1, WARMUP_RUNS + 1):
                 state.termination = execute_warmup_group(
                     scenario=scenario,
@@ -192,7 +197,7 @@ def run_scenario(
                     stmt=stmt,
                     query_idx=query_idx,
                     warmup_pass=warmup_pass,
-                    entry_variants=prepared.entry_variants,
+                    selected_variants=prepared.selected_variants,
                     conn=conn,
                     statement_timeout_ms=statement_timeout_ms,
                     warmup_failures=state.warmup_failures,
@@ -213,7 +218,7 @@ def run_scenario(
                     stmt=stmt,
                     query_idx=query_idx,
                     rep=rep,
-                    entry_variants=prepared.entry_variants,
+                    selected_variants=prepared.selected_variants,
                     conn=conn,
                     statement_timeout_ms=statement_timeout_ms,
                     warmup_timeout_keys=state.warmup_timeout_keys,
@@ -245,7 +250,7 @@ def execute_warmup_group(
     stmt: str,
     query_idx: int,
     warmup_pass: int,
-    entry_variants: list[Variant],
+    selected_variants: list[Variant],
     conn: Optional[ConnOpts],
     statement_timeout_ms: int,
     warmup_failures: list[dict[str, Any]],
@@ -260,7 +265,7 @@ def execute_warmup_group(
     """
 
     # Example with [dp, geqo, my_algo]: offsets 0/1/2 run dp/geqo/my_algo first.
-    ordered_variants = rotate_variants(entry_variants, query_idx + warmup_pass - 1)
+    ordered_variants = rotate_variants(selected_variants, query_idx + warmup_pass - 1)
     for variant in ordered_variants:
         try:
             run_one_statement(
@@ -315,7 +320,7 @@ def execute_measured_group(
     stmt: str,
     query_idx: int,
     rep: int,
-    entry_variants: list[Variant],
+    selected_variants: list[Variant],
     conn: Optional[ConnOpts],
     statement_timeout_ms: int,
     warmup_timeout_keys: set[tuple[str, str, str]],
@@ -330,7 +335,7 @@ def execute_measured_group(
     """
 
     # Repetitions rotate too, so a fixed variant is not always first for a query.
-    ordered_variants = rotate_variants(entry_variants, query_idx + rep - 1)
+    ordered_variants = rotate_variants(selected_variants, query_idx + rep - 1)
     termination: dict[str, Any] | None = None
     for variant in ordered_variants:
         key = (spec.dataset, query.query_id, variant.name)
