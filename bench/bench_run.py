@@ -35,6 +35,34 @@ from bench_results import build_run_context, write_raw_csv, write_run_context, w
 
 MEASURED_REPS = 3
 WARMUP_RUNS = 1
+WARMUP_TIMEOUT_CATEGORY = "statement_timeout"
+WARMUP_TIMEOUT_SKIP_PREFIX = "skipped measured run after warmup timeout:"
+
+
+# Run state.
+
+
+@dataclass
+class RunState:
+    """Mutable rows and failure state for one benchmark run."""
+
+    raw_rows: list[dict[str, str]] = field(default_factory=list)
+    summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = field(default_factory=dict)
+    warmup_failures: list[dict[str, Any]] = field(default_factory=list)
+    warmup_timeout_keys: set[tuple[str, str, str]] = field(default_factory=set)
+    termination: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class PreparedRunWork:
+    """Resolved query and variant work for one dataset run."""
+
+    spec: ResolvedDatasetRun
+    entry_variants: list[Variant]
+    query_plans: list[tuple[QueryMeta, str]]
+
+
+# Scenario execution.
 
 
 def run_scenario(
@@ -199,24 +227,7 @@ def run_scenario(
     summarize_run_completion(state)
 
 
-@dataclass
-class RunState:
-    """Mutable rows and failure state for one benchmark run."""
-
-    raw_rows: list[dict[str, str]] = field(default_factory=list)
-    summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = field(default_factory=dict)
-    warmup_failures: list[dict[str, Any]] = field(default_factory=list)
-    warmup_timeout_keys: set[tuple[str, str, str]] = field(default_factory=set)
-    termination: dict[str, Any] | None = None
-
-
-@dataclass(frozen=True)
-class PreparedRunWork:
-    """Resolved query and variant work for one dataset run."""
-
-    spec: ResolvedDatasetRun
-    entry_variants: list[Variant]
-    query_plans: list[tuple[QueryMeta, str]]
+# Warmup and measured group execution.
 
 
 def execute_warmup_group(
@@ -261,7 +272,7 @@ def execute_warmup_group(
                 variant=variant,
                 query=query,
                 error=str(e),
-                category="statement_timeout",
+                category=WARMUP_TIMEOUT_CATEGORY,
             )
         except Exception as e:
             record_warmup_failure(
@@ -384,6 +395,9 @@ def execute_measured_group(
     return termination
 
 
+# Failure recording and reporting.
+
+
 def record_warmup_failure(
     *,
     warmup_failures: list[dict[str, Any]],
@@ -407,7 +421,7 @@ def record_warmup_failure(
             "error": error,
         }
     )
-    label = "warmup_timeout" if category == "statement_timeout" else "warmup_error"
+    label = "warmup_timeout" if category == WARMUP_TIMEOUT_CATEGORY else "warmup_error"
     print(
         f"[run] {label} dataset={spec.dataset} variant={variant.name} "
         f"query={query.query_id}: {error}"
@@ -417,7 +431,7 @@ def record_warmup_failure(
 def warmup_timeout_skip_error(original_error: str) -> str:
     """Return the measured-row error used when warmup already timed out."""
 
-    return f"skipped measured run after warmup timeout: {original_error}"
+    return f"{WARMUP_TIMEOUT_SKIP_PREFIX} {original_error}"
 
 
 def print_failure_rows(*, label: str, rows: list[dict[str, Any]]) -> None:
@@ -439,20 +453,20 @@ def summarize_run_completion(state: RunState) -> None:
     """Print the final run status and exit non-zero for fatal termination."""
 
     warmup_timeout_rows = [
-        row for row in state.warmup_failures if row["category"] == "statement_timeout"
+        row for row in state.warmup_failures if row["category"] == WARMUP_TIMEOUT_CATEGORY
     ]
     warmup_error_rows = [row for row in state.warmup_failures if row["category"] == "error"]
     skipped_timeout_rows = [
         row
         for row in state.raw_rows
         if row["status"] == "timeout"
-        and row["error"].startswith("skipped measured run after warmup timeout:")
+        and row["error"].startswith(WARMUP_TIMEOUT_SKIP_PREFIX)
     ]
     timeout_rows = [
         row
         for row in state.raw_rows
         if row["status"] == "timeout"
-        and not row["error"].startswith("skipped measured run after warmup timeout:")
+        and not row["error"].startswith(WARMUP_TIMEOUT_SKIP_PREFIX)
     ]
     err_rows = [row for row in state.raw_rows if row["status"] == "error"]
 
@@ -478,6 +492,9 @@ def summarize_run_completion(state: RunState) -> None:
         print("[run] completed without errors")
 
 
+# Variant ordering.
+
+
 def rotate_variants(variants: list[Variant], offset: int) -> list[Variant]:
     """Rotate variant execution order for one query group."""
 
@@ -487,6 +504,9 @@ def rotate_variants(variants: list[Variant], offset: int) -> list[Variant]:
     if normalized == 0:
         return list(variants)
     return list(variants[normalized:]) + list(variants[:normalized])
+
+
+# Artifact flushing.
 
 
 def flush_outputs(
