@@ -84,9 +84,8 @@ Prepare the data:
 python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 ```
 
-If an already prepared database is present, `prepare` skips it.  Use
-`--force-recreate` only when intentionally dropping and rebuilding the benchmark
-database.
+`prepare` always recreates the scenario's benchmark databases.  If you want to
+reuse existing data, skip `prepare` and run the benchmark directly.
 
 Run the portable baselines:
 
@@ -142,8 +141,8 @@ python3 bench/bench.py run extended --variants my_algo_p1 --min-join 12 --tag p1
 python3 bench/bench.py run extended --variants my_algo_p2 --min-join 12 --reuse-stats --tag p2
 ```
 
-Do not recreate data or run `ANALYZE` between runs if the comparison depends on
-stable statistics.
+Do not run `prepare`, recreate data, or run `ANALYZE` between runs if the
+comparison depends on stable statistics.
 
 ## Reviewer Workbook
 
@@ -165,7 +164,8 @@ python3 tools/render_review_tables.py outputs/<run_id>
 
 The script writes `outputs/<run_id>/review.xlsx`.  Workbook layout, `SUM` row
 semantics, and ratio color rules are documented in [OUTPUTS.md](OUTPUTS.md).
-The workbook ratio view expects the run to include `dp`.
+Ratio columns compare non-reference variants to `dp` and/or `geqo` when those
+variants are selected.
 
 ## Common Run Options
 

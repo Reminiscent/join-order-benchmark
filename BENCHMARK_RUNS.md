@@ -28,15 +28,15 @@ JOB-Complex workloads.  `extended` adds the heavier CEB IMDB 3k workload.
 
 ## Prepare Phase
 
-`bench.py prepare <scenario>` creates the target PostgreSQL databases and loads
-the datasets selected by the scenario.  For `main`, both `job` and `job_complex`
-use the same `imdb_bench` database, so IMDB data is loaded once and reused by
-both query suites.
+`bench.py prepare <scenario>` recreates the target PostgreSQL databases and
+loads the datasets selected by the scenario.  For `main`, both `job` and
+`job_complex` use the same `imdb_bench` database, so IMDB data is loaded once
+and reused by both query suites.
 
 IMDB-backed datasets require `--csv-dir` because the CSV bundle is not vendored
 here.  Self-contained datasets, such as SQLite select5 and GPUQO small
-workloads, load local SQL files.  If a target database already looks prepared,
-`prepare` skips it; use `--force-recreate` only to drop and rebuild it.
+workloads, load local SQL files.  To reuse existing data, skip `prepare` and run
+the benchmark directly.
 
 Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 
@@ -46,7 +46,7 @@ Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 
 1. Resolve the scenario, datasets, variants, and query list.
 2. Check that benchmark databases are reachable and required GUCs exist.
-3. Unless `--reuse-stats` is passed, stabilize each distinct prepared database
+3. Unless `--reuse-stats` is passed, stabilize each distinct target database
    with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.  Datasets that
    share one database, such as `job` and `job_complex`, share this one step.
 4. Write the initial `run.json` so the intended run shape is visible even if

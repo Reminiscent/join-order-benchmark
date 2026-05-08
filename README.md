@@ -42,6 +42,8 @@ python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 python3 bench/bench.py run main --variants dp,geqo
 ```
 
+`prepare` recreates benchmark databases; skip it when reusing existing data.
+
 The built-in baselines are `dp` and `geqo`.  Extra variants, such as additional
 algorithms or alternate parameter settings, are defined in
 `examples/variants.toml`; the CLI loads that file by default when it exists.

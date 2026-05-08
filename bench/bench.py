@@ -56,13 +56,12 @@ def main() -> None:
         die(f"unknown scenario '{scenario_name}' (see: python3 bench/bench.py list scenarios)")
     scenario = scenarios[scenario_name]
 
-    # Prepare materializes the databases required by the selected scenario.
+    # Prepare recreates the databases required by the selected scenario.
     if args.cmd == "prepare":
         prepare_scenario(
             scenario,
             csv_dir=args.csv_dir,
             conn=conn,
-            force_recreate=args.force_recreate,
         )
         return
 
@@ -120,14 +119,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap_list.add_argument("what", choices=["scenarios", "variants", "datasets"])
     add_variant_file_arg(ap_list)
 
-    ap_prepare = sub.add_parser("prepare", help="Prepare databases for a scenario.")
+    ap_prepare = sub.add_parser("prepare", help="Recreate databases for a scenario.")
     ap_prepare.add_argument("scenario", help="scenario name (see: list scenarios)")
     ap_prepare.add_argument("--csv-dir", default=None, help="IMDB CSV directory for IMDB-backed datasets")
-    ap_prepare.add_argument(
-        "--force-recreate",
-        action="store_true",
-        help="drop and recreate an existing benchmark database instead of skipping or failing",
-    )
     add_conn_args(ap_prepare)
 
     ap_run = sub.add_parser("run", help="Run a scenario and write results to outputs/<run_id>/")

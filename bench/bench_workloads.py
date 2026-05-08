@@ -52,17 +52,6 @@ DEFAULT_DB_BY_DATASET = {
     "gpuqo_snowflake_small": "gpuqo_snowflake_small_bench",
 }
 
-PREPARE_MARKERS = {
-    "job": ("title", "aka_name"),
-    "job_complex": ("title", "aka_name"),
-    "imdb_ceb_3k": ("title", "aka_name"),
-    "sqlite_select5": ("t1", "t64"),
-    "gpuqo_chain_small": ("t1", "t40"),
-    "gpuqo_clique_small": ("t1", "t40"),
-    "gpuqo_star_small": ("t0", "t39"),
-    "gpuqo_snowflake_small": ("t_1", "t_1_16"),
-}
-
 SELECT5_HEADER_RE = re.compile(r"^--\s*query\s+(\d+)\s+\((.*?)\)\s*$", flags=re.IGNORECASE)
 DEFAULT_VARIANTS_FILE = REPO_ROOT / "examples" / "variants.toml"
 
@@ -241,7 +230,7 @@ def resolve_dataset_runs(
 def resolve_prepare_dataset_runs(
     scenario: Scenario,
 ) -> list[ResolvedDatasetRun]:
-    """Resolve scenario datasets that must be prepared before a run."""
+    """Resolve scenario datasets that the prepare command recreates."""
 
     known_datasets = set(available_datasets())
     datasets = list(dict.fromkeys(scenario.datasets))

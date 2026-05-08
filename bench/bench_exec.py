@@ -95,7 +95,7 @@ def stabilize_db(
 
 
 def ensure_databases_reachable(dbs: list[str], conn: Optional[ConnOpts] = None) -> None:
-    """Fail early when a prepared benchmark database cannot be reached."""
+    """Fail early when a benchmark database cannot be reached."""
 
     for db in dbs:
         p = run_cmd(psql_cmd(db, conn) + ["-At"], input_text="SELECT 1;\n", check=False)
@@ -105,7 +105,7 @@ def ensure_databases_reachable(dbs: list[str], conn: Optional[ConnOpts] = None) 
         die(
             f"cannot connect to benchmark database '{db}': "
             f"{first_error_line(out) or 'connection failed'}. "
-            "Run prepare first or fix the PostgreSQL connection flags."
+            "Run prepare first, reuse an existing database, or fix the PostgreSQL connection flags."
         )
 
 

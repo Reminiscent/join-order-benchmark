@@ -51,7 +51,7 @@ def run_scenario(
     """Execute one resolved benchmark scenario and write run artifacts.
 
     Each invocation creates a new output directory.  By default, the runner
-    stabilizes each prepared database before executing queries, writes
+    stabilizes each target database before executing queries, writes
     ``raw.csv``, ``summary.csv``, and ``run.json`` as work completes, records
     ``statement_timeout`` as benchmark data, and exits non-zero on non-timeout
     errors after writing the current artifacts.

@@ -29,7 +29,7 @@ Read these files first:
 bench.py prepare
     -> bench_workloads.py
     -> bench_prepare.py
-    -> prepared PostgreSQL databases
+    -> recreated PostgreSQL databases
 ```
 
 `bench.py run` is the measurement path:
@@ -47,7 +47,7 @@ bench.py run
 
 | File | Role |
 | --- | --- |
-| [bench_prepare.py](bench_prepare.py) | Database creation/loading and prepared-database checks. |
+| [bench_prepare.py](bench_prepare.py) | Database recreation and dataset loading. |
 | [bench_common.py](bench_common.py) | Shared records, repository paths, SQL quoting, and `psql` helpers. |
 | [bench_review_tables.py](bench_review_tables.py) | Optional `review.xlsx` rendering; not needed to understand the run protocol. |
 
