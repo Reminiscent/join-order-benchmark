@@ -56,15 +56,12 @@ def run_one_statement(
     """Run one benchmark statement in a clean PostgreSQL session.
 
     The generated script resets the session, applies the scenario GUCs, applies
-    the selected variant GUCs, applies optional variant GUCs only when the
-    server supports them, and finally runs EXPLAIN JSON.  A PostgreSQL
+    the selected variant GUCs, and finally runs EXPLAIN JSON.  A PostgreSQL
     statement_timeout is reported as ``StatementTimeoutError`` so the run
     driver can classify it separately from other execution errors.
     """
 
-    script_lines = [
-        *build_session_prelude(db, conn, scenario_session_gucs, variant, statement_timeout_ms)
-    ]
+    script_lines = [*build_session_prelude(scenario_session_gucs, variant, statement_timeout_ms)]
     script_lines.extend([explain_sql(stmt), ""])
 
     script = "\n".join(script_lines)
@@ -87,23 +84,7 @@ def run_one_statement(
 # Per-statement session script construction.
 
 
-def resolved_variant_session_gucs(
-    db: str,
-    conn: Optional[ConnOpts],
-    variant: Variant,
-) -> tuple[tuple[str, object], ...]:
-    """Return the variant GUCs that will actually be applied on this server."""
-
-    resolved = list(variant.session_gucs)
-    for name, value in variant.optional_session_gucs:
-        if guc_exists(db, conn, name):
-            resolved.append((name, value))
-    return tuple(resolved)
-
-
 def build_session_prelude(
-    db: str,
-    conn: Optional[ConnOpts],
     scenario_session_gucs: tuple[tuple[str, Any], ...],
     variant: Variant,
     statement_timeout_ms: int,
@@ -113,10 +94,7 @@ def build_session_prelude(
     lines = ["RESET ALL;"]
     lines.append(f"SET statement_timeout = {statement_timeout_ms};")
     lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in scenario_session_gucs)
-    lines.extend(
-        f"SET {k} = {sql_literal(v)};"
-        for k, v in resolved_variant_session_gucs(db, conn, variant)
-    )
+    lines.extend(f"SET {k} = {sql_literal(v)};" for k, v in variant.session_gucs)
     return lines
 
 

@@ -24,7 +24,8 @@ Each `[[variant]]` entry supports:
 - `label`
   Human-readable label used in reviewer tables.
 - `session_gucs`
-  Required session-level PostgreSQL parameters for the variant.
-- `optional_session_gucs`
-  Parameters applied only when the current PostgreSQL build exposes that GUC.
-  This is useful for portable baseline cleanup on patched builds.
+  Required session-level PostgreSQL parameters for the variant.  Every listed
+  GUC must exist on the target PostgreSQL server.
+
+Patched builds should keep new algorithm switches disabled by default.  Enable
+or tune them explicitly in `session_gucs` for the variants that need them.

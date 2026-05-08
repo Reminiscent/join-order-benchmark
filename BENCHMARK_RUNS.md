@@ -98,11 +98,12 @@ SET effective_cache_size = '8GB';
 -- followed by variant-specific SET commands
 ```
 
-Variant settings are applied after the scenario settings.  Optional variant
-GUCs are applied only when the current PostgreSQL build exposes that GUC.  The
-harness emits these session settings before every warmup and measured SQL
-because each statement runs in its own `psql` session.  It does not change
-restart-required cluster settings.
+Variant settings are applied after the scenario settings, and every configured
+variant GUC must exist on the target server.  The harness emits these session
+settings before every warmup and measured SQL because each statement runs in
+its own `psql` session.  It does not change restart-required cluster settings.
+Patched builds should keep new planner algorithms disabled by default; enable
+them explicitly through variant `session_gucs`.
 
 ## Timing Collection
 

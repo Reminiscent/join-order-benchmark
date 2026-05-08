@@ -87,7 +87,6 @@ class RunScenarioTests(unittest.TestCase):
         stack.enter_context(patch.object(bench_run, "WARMUP_RUNS", warmup_runs))
         stack.enter_context(patch.object(bench_run, "ensure_databases_reachable", Mock()))
         stack.enter_context(patch.object(bench_run, "validate_required_gucs", Mock()))
-        stack.enter_context(patch.object(bench_run, "resolved_variant_session_gucs", Mock(return_value=())))
         stabilize_mock = Mock()
         stack.enter_context(patch.object(bench_run, "stabilize_db", stabilize_mock))
         stack.enter_context(patch.object(bench_run, "select_queries", Mock(return_value=queries or [self.make_query()])))
@@ -351,6 +350,24 @@ class RunScenarioTests(unittest.TestCase):
             stabilize_mock.assert_not_called()
             run_context = self.read_run_context(self.only_run_dir(outputs_dir))
             self.assertEqual(run_context["protocol"]["stats_refresh"], "reuse_existing")
+
+    def test_guc_validation_only_checks_selected_variants(self) -> None:
+        scenario = self.make_scenario()
+        variants = {
+            "dp": Variant(name="dp", label="dp", session_gucs=(("geqo_threshold", 100),)),
+            "unused": Variant(
+                name="unused",
+                label="Unused",
+                session_gucs=(("missing_unused_guc", "on"),),
+            ),
+        }
+
+        with patch.object(
+            bench_exec,
+            "guc_exists",
+            Mock(side_effect=lambda _db, _conn, name: name != "missing_unused_guc"),
+        ):
+            bench_exec.validate_required_gucs("bench_db", None, scenario, variants, ("dp",))
 
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")

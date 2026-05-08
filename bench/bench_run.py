@@ -25,7 +25,6 @@ from bench_common import (
 from bench_exec import (
     StatementTimeoutError,
     ensure_databases_reachable,
-    resolved_variant_session_gucs,
     run_one_statement,
     stabilize_db,
     validate_required_gucs,
@@ -107,16 +106,12 @@ def run_scenario(
     dbs = sorted({entry.db for entry in resolved_runs})
     ensure_databases_reachable(dbs, conn)
     validate_required_gucs(dbs[0], conn, scenario, variants_registry, variant_names)
-    # Snapshot the variant GUCs that this server will actually receive.  Optional
-    # GUCs are included only when supported, so run.json remains reproducible.
+    # Snapshot the variant GUCs that will be SET for this run.
     effective_variant_contexts = [
         {
             "name": variants_registry[name].name,
             "label": variants_registry[name].label,
-            "session_gucs": [
-                {k: v}
-                for k, v in resolved_variant_session_gucs(dbs[0], conn, variants_registry[name])
-            ],
+            "session_gucs": [{k: v} for k, v in variants_registry[name].session_gucs],
         }
         for name in variant_names
     ]

@@ -37,12 +37,11 @@ class QueryMeta:
 
 @dataclass(frozen=True)
 class Variant:
-    """One algorithm/configuration variant with required and optional GUCs."""
+    """One algorithm/configuration variant with required session GUCs."""
 
     name: str
     label: str
     session_gucs: tuple[tuple[str, Any], ...]
-    optional_session_gucs: tuple[tuple[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)

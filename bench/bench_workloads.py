@@ -59,13 +59,11 @@ BUILT_IN_VARIANTS = (
         name="dp",
         label="dp",
         session_gucs=(("geqo_threshold", 100),),
-        optional_session_gucs=(("enable_goo_join_search", "off"),),
     ),
     Variant(
         name="geqo",
         label="GEQO",
         session_gucs=(("geqo_threshold", 2),),
-        optional_session_gucs=(("enable_goo_join_search", "off"),),
     ),
 )
 
@@ -146,14 +144,10 @@ def load_variants(path: Optional[Path] = None) -> dict[str, Variant]:
         raw_gucs = entry.get("session_gucs", {})
         if not isinstance(raw_gucs, dict):
             die(f"variant '{name}' has invalid session_gucs in {variants_path}")
-        raw_optional_gucs = entry.get("optional_session_gucs", {})
-        if not isinstance(raw_optional_gucs, dict):
-            die(f"variant '{name}' has invalid optional_session_gucs in {variants_path}")
         out[name] = Variant(
             name=name,
             label=label,
             session_gucs=tuple((str(k), v) for k, v in raw_gucs.items()),
-            optional_session_gucs=tuple((str(k), v) for k, v in raw_optional_gucs.items()),
         )
     return out
 
