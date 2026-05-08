@@ -170,18 +170,17 @@ The XLSX workbook contains two sheets:
 - `planning`
 
 The workbook is the reviewer-facing attachment: it has frozen headers, grouped
-metric and ratio columns, number formats, a `SUM` row, and ratio colors.  The
-XLSX export uses optional `XlsxWriter`; benchmark prepare/run does not need it.
+metric and ratio columns, number formats, a `SUM` row, and ratio colors.
+Rendering it requires `XlsxWriter`; benchmark prepare/run does not need that
+package.
 
 Ratio columns are direct `variant/reference` ratios: every non-baseline variant
 is compared to each selected baseline variant recorded in `run.json`.  Baseline
 variants are not compared with each other.  For normal benchmark scenarios,
 execution time is the primary result; for the `planning` scenario, use the
 planning-time sheet as the primary signal.  All datasets recorded in `run.json`
-are shown in one table, with `dataset` as the first column, so the uploaded
-attachment count stays small even for larger runs.
-Workbook column headers use variant labels from `run.json`, falling back to
-variant names when no label is recorded.
+are shown in one table, with `dataset` as the first column, and workbook column
+headers use variant labels recorded in `run.json`.
 
 ### Example Table Shape
 

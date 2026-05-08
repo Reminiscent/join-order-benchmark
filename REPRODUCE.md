@@ -62,9 +62,9 @@ by every variant.  Keep run-protocol settings there when they should stay
 identical across algorithms or parameter sweeps.
 
 `config/variants.toml` defines algorithm variants.  A variant is one named run
-configuration: a label, an optional `baseline = true` marker, and
-variant-specific session GUCs.  Baseline variants are used when `--variants` is
-omitted and as reviewer-table ratio references when they are part of a run.
+configuration with its label, baseline marker, and variant-specific session
+GUCs.  Baseline variants are used when `--variants` is omitted and as
+reviewer-table ratio references when they are part of a run.
 
 Both file formats and defaults are documented in [config/README.md](config/README.md).
 The runner validates shared GUCs and selected variant GUCs before refreshing
@@ -83,7 +83,7 @@ python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
 `prepare` always recreates the scenario's benchmark databases.  If you want to
 reuse existing data, skip `prepare` and run the benchmark directly.
 
-Run the configured baselines:
+Run the baseline variants:
 
 ```bash
 python3 bench/bench.py run main --variants dp,geqo
@@ -101,7 +101,7 @@ Run `extended` after `main` when broader IMDB-backed coverage is needed:
 
 ```bash
 python3 bench/bench.py prepare extended --csv-dir "$(pwd)/data/imdb_csv"
-python3 bench/bench.py run extended
+python3 bench/bench.py run extended --variants dp,geqo
 ```
 
 Run `planning` separately for synthetic wide-join planning checks:

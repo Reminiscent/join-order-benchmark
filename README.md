@@ -35,7 +35,7 @@ for IMDB-backed workloads.  Public runs also configure `shared_buffers=4GB`
 before measurement; see [REPRODUCE.md](REPRODUCE.md) and
 [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the full checklist.
 
-Prepare and run the primary scenario with the configured baselines:
+Prepare data and run the primary scenario with the baseline variants:
 
 ```bash
 python3 bench/bench.py prepare main --csv-dir "$(pwd)/data/imdb_csv"
@@ -44,8 +44,8 @@ python3 bench/bench.py run main --variants dp,geqo
 
 `prepare` recreates benchmark databases; skip it when reusing existing data.
 
-Algorithm variants, including baseline variants such as `dp` and `geqo`, are
-defined in `config/variants.toml`.  Shared PostgreSQL session settings live in
+Algorithm variants, including baselines such as `dp` and `geqo`, are defined in
+`config/variants.toml`.  Shared PostgreSQL session settings live in
 `config/benchmark_settings.toml`.
 
 To focus a scenario on larger joins, add a manifest join-size lower bound:

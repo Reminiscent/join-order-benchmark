@@ -37,7 +37,7 @@ class QueryMeta:
 
 @dataclass(frozen=True)
 class Variant:
-    """One algorithm/configuration variant with required session GUCs."""
+    """One algorithm/configuration variant with its session GUCs."""
 
     name: str
     label: str

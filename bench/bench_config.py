@@ -10,13 +10,9 @@ from __future__ import annotations
 import csv
 import functools
 import re
+import tomllib
 from pathlib import Path
 from typing import Any, Optional
-
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
 
 from bench_common import (
     MANIFEST_PATH,
@@ -73,36 +69,22 @@ DEFAULT_DB_BY_DATASET = {
 # Scenarios select workload groups only.  Algorithm choices come from
 # config/variants.toml and the CLI --variants override.
 
-def built_in_scenario(
-    *,
-    name: str,
-    description: str,
-    datasets: tuple[str, ...],
-) -> Scenario:
-    """Create one public scenario from a workload list."""
-
-    return Scenario(
-        name=name,
-        description=description,
-        datasets=datasets,
-    )
-
 
 def load_scenarios() -> dict[str, Scenario]:
     """Return the public scenario registry used by the CLI."""
 
     scenarios = (
-        built_in_scenario(
+        Scenario(
             name="main",
             description="Primary algorithm validation path on complete JOB and JOB-Complex.",
             datasets=MAIN_DATASETS,
         ),
-        built_in_scenario(
+        Scenario(
             name="extended",
             description="Main validation plus the heavier CEB IMDB 3k workload.",
             datasets=MAIN_DATASETS + CEB_DATASETS,
         ),
-        built_in_scenario(
+        Scenario(
             name="planning",
             description="Self-contained synthetic workloads for planning/search-space stress.",
             datasets=PLANNING_DATASETS,

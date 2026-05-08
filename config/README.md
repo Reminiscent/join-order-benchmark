@@ -2,7 +2,8 @@
 
 `variants.toml` defines all algorithm variants used by the runner.  A variant
 can represent a join-order algorithm or the same algorithm with different
-parameters.
+parameters.  Edit this file to add algorithms or parameter settings, then pick
+the desired subset with `--variants`.
 
 Variants marked with `baseline = true` are used when `--variants` is omitted.
 They are also the reviewer-table references when they are part of a run.
@@ -30,7 +31,7 @@ python3 bench/bench.py list variants
 python3 bench/bench.py run main --variants dp,geqo,goo_cost
 ```
 
-Each `[[variant]]` entry supports:
+Variant entries use these fields:
 
 - `name`
   Stable variant id used by CLI arguments.
@@ -40,8 +41,8 @@ Each `[[variant]]` entry supports:
   Optional boolean.  Baseline variants are the default run selection and the
   ratio references in reviewer tables.
 - `session_gucs`
-  Required session-level PostgreSQL parameters for the variant.  Every listed
-  GUC for a selected variant must exist on the target PostgreSQL server.
+  Variant-specific session-level PostgreSQL parameters.  Every listed GUC for
+  a selected variant must exist on the target PostgreSQL server.
 
 Put a setting in `benchmark_settings.toml` only when it should apply to every
 variant in the run.

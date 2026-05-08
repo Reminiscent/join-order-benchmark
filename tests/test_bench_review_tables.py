@@ -154,7 +154,7 @@ class BenchReviewTablesTests(unittest.TestCase):
         self.assertAlmostEqual(row_10a.ratios[("my_algo", "dp")].raw or 0.0, 0.8)
         self.assertAlmostEqual(row_10a.ratios[("my_algo", "geqo")].raw or 0.0, 0.64)
 
-    def test_ratio_references_are_optional(self) -> None:
+    def test_selected_baseline_subset_is_used_as_ratio_reference(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = self.make_run_dir(tmpdir)
             run_context = json.loads((run_dir / "run.json").read_text())
@@ -178,13 +178,43 @@ class BenchReviewTablesTests(unittest.TestCase):
         row_10a = next(row for row in table.rows if row.query_id == "10a")
         self.assertAlmostEqual(row_10a.ratios[("my_algo", "geqo")].raw or 0.0, 0.64)
 
+    def test_review_table_requires_run_context_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = self.make_run_dir(tmpdir)
+            run_context = json.loads((run_dir / "run.json").read_text())
+            run_context["variants"] = []
+            rows_by_dataset, query_order = load_summary_rows(run_dir / "summary.csv")
+
+            with self.assertRaises(SystemExit) as ctx:
+                build_review_table(
+                    run_context=run_context,
+                    rows_by_dataset=rows_by_dataset,
+                    query_order=query_order,
+                    datasets=["job"],
+                    metric="execution",
+                )
+
+        self.assertIn("run context does not contain selected variants", str(ctx.exception))
+
+    def test_write_review_tables_requires_run_context_datasets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = self.make_run_dir(tmpdir)
+            run_context = json.loads((run_dir / "run.json").read_text())
+            run_context["datasets"] = []
+            (run_dir / "run.json").write_text(json.dumps(run_context) + "\n")
+
+            with self.assertRaises(SystemExit) as ctx:
+                write_review_tables(
+                    run_dir=run_dir,
+                    datasets=[],
+                )
+
+        self.assertIn("run context does not contain selected datasets", str(ctx.exception))
+
     def test_review_labels_come_from_run_context(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = self.make_run_dir(tmpdir)
             run_context = json.loads((run_dir / "run.json").read_text())
-            for entry in run_context["variants"]:
-                if entry["name"] == "fast_algo":
-                    entry.pop("label")
             rows_by_dataset, query_order = load_summary_rows(run_dir / "summary.csv")
 
             table = build_review_table(
@@ -197,7 +227,7 @@ class BenchReviewTablesTests(unittest.TestCase):
 
         self.assertEqual(table.labels["dp"], "dp")
         self.assertEqual(table.labels["my_algo"], "My Algorithm")
-        self.assertEqual(table.labels["fast_algo"], "fast_algo")
+        self.assertEqual(table.labels["fast_algo"], "Fast Algorithm")
 
     def test_worksheet_writes_integer_join_size_and_geqo_ratio(self) -> None:
         class FakeWorkbook:

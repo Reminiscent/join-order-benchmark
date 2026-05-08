@@ -54,7 +54,7 @@ class BenchConfigTests(unittest.TestCase):
             ):
                 load_variants()
 
-    def test_load_scenarios_uses_built_in_definitions(self) -> None:
+    def test_load_scenarios_returns_public_scenarios(self) -> None:
         scenarios = load_scenarios()
 
         self.assertEqual(tuple(scenarios), ("main", "extended", "planning"))

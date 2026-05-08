@@ -11,7 +11,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 METRICS = {
     "execution": ("execution_ms_median", "Execution Time"),
@@ -89,7 +89,7 @@ class ReviewTable:
     total_ratios: dict[RatioPair, ReviewTableCell]
 
 
-# CSV loading and display labels.
+# CSV loading.
 
 
 def maybe_float(raw: str) -> float | None:
@@ -252,29 +252,21 @@ def first_row_for_query(dataset_rows: dict[str, dict[str, SummaryRow]], query_id
     return None
 
 
-def resolve_combined_variant_order(
+def resolve_variant_order(
     *,
     run_context: dict[str, Any],
     rows_by_dataset: dict[str, dict[str, dict[str, SummaryRow]]],
     selected_datasets: list[str],
 ) -> tuple[str, ...]:
-    """Resolve the displayed variant order for combined datasets.
+    """Resolve the displayed variant order from run metadata."""
 
-    ``run.json`` order is used before falling back to variants discovered in
-    ``summary.csv`` for older or partial artifacts.
-    """
-    configured = [
+    variants = tuple(
         str(entry["name"])
         for entry in run_context.get("variants", [])
         if isinstance(entry, dict) and entry.get("name")
-    ]
-    if configured:
-        variants = tuple(configured)
-    else:
-        found: list[str] = []
-        for dataset in selected_datasets:
-            found.extend(rows_by_dataset.get(dataset, {}))
-        variants = tuple(sorted(set(found)))
+    )
+    if not variants:
+        raise SystemExit("run context does not contain selected variants")
 
     missing = [
         variant
@@ -287,13 +279,13 @@ def resolve_combined_variant_order(
 
 
 def label_map(run_context: dict[str, Any], variants: tuple[str, ...]) -> dict[str, str]:
-    """Build display labels from run metadata, falling back to variant names."""
+    """Build display labels from run metadata."""
     labels = {
         str(entry.get("name")): str(entry.get("label") or entry.get("name"))
         for entry in run_context.get("variants", [])
         if isinstance(entry, dict) and entry.get("name")
     }
-    return {variant: labels.get(variant, variant) for variant in variants}
+    return {variant: labels[variant] for variant in variants}
 
 
 # Review table construction.
@@ -319,7 +311,7 @@ def build_review_table(
         raise SystemExit(f"unknown metric '{metric}'")
 
     metric_column, metric_title = METRICS[metric]
-    variants = resolve_combined_variant_order(
+    variants = resolve_variant_order(
         run_context=run_context,
         rows_by_dataset=rows_by_dataset,
         selected_datasets=datasets,
@@ -660,13 +652,11 @@ def write_review_tables(
         dict.fromkeys(
             str(entry["dataset"])
             for entry in run_context.get("datasets", [])
-            if isinstance(entry, dict) and entry.get("dataset") in rows_by_dataset
+            if isinstance(entry, dict) and entry.get("dataset")
         )
     )
     if not selected_datasets:
-        selected_datasets = sorted(rows_by_dataset)
-
-    require_xlsxwriter()
+        raise SystemExit("run context does not contain selected datasets")
 
     tables: list[ReviewTable] = []
     for metric in DEFAULT_METRICS:
