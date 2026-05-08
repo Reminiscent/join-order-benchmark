@@ -43,17 +43,18 @@ Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
 
 `bench.py run <scenario>` performs the measured benchmark run:
 
-1. Resolve the scenario, datasets, variants, and query list.
+1. Resolve the scenario, datasets, variants, and min-join filters.
 2. Check that benchmark databases are reachable and required GUCs exist.
-3. Unless `--reuse-stats` is passed, stabilize each distinct target database
+3. Select and load the exact query SQL for each dataset.
+4. Unless `--reuse-stats` is passed, stabilize each distinct target database
    with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.  Datasets that
    share one database, such as `job` and `job_complex`, share this one step.
-4. Write the initial `run.json` so the intended run shape is visible even if
-   the process is interrupted.
-5. For each query group, run discarded warmup pass(es), then measured
+5. Write the initial `run.json`, `raw.csv`, and `summary.csv` so the intended
+   run shape is visible even if the process is interrupted.
+6. For each query group, run discarded warmup pass(es), then measured
    repetitions.
-6. Rewrite `run.json`, `raw.csv`, and `summary.csv` as each group finishes, or
-   before exiting on a fatal error.
+7. Rewrite `run.json`, `raw.csv`, and `summary.csv` as each query group
+   finishes, or before exiting on a fatal error during query execution.
 
 [bench/bench_run.py](bench/bench_run.py) is the execution driver.  It keeps the
 main run loop ordered by dataset, query, warmup pass, repetition, and variant.

@@ -36,11 +36,13 @@ bench.py prepare
 bench.py run
     -> resolve scenario, variants, datasets, databases, and min-join filter
        [bench_workloads.py]
-    -> create outputs/<run_id>, validate databases/GUCs, and stabilize stats
+    -> create outputs/<run_id> and validate databases/GUCs
+       [bench_run.py, bench_exec.py]
+    -> select, load, and wrap SQL for each dataset/query group
+       [bench_run.py, bench_workloads.py]
+    -> stabilize stats unless the run reuses existing statistics
        [bench_run.py, bench_exec.py]
     -> for each dataset/query/variant group:
-         load and wrap SQL
-         [bench_workloads.py]
          apply GUCs and run one `EXPLAIN ANALYZE` JSON statement
          [bench_exec.py]
          collect per-repetition rows and summary inputs

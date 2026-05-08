@@ -94,7 +94,7 @@ def run_scenario(
     stabilizes each target database before executing queries, writes
     ``raw.csv``, ``summary.csv``, and ``run.json`` as work completes, records
     ``statement_timeout`` as benchmark data, and exits non-zero on non-timeout
-    errors after writing the current artifacts.
+    query-execution errors after writing the current artifacts.
     """
 
     if statement_timeout_ms < 0:
@@ -129,7 +129,7 @@ def run_scenario(
     print(f"[run] stats_refresh={stats_refresh}")
     print(f"[run] outputs={out_dir}")
 
-    # Stage 3: prepare dataset-level work before any measured rows are written.
+    # Stage 3: select/load all query work, then refresh stats once per database.
     dataset_contexts, prepared_runs = prepare_dataset_work(
         resolved_runs=resolved_runs,
         variants_registry=variants_registry,
@@ -181,7 +181,7 @@ def prepare_dataset_work(
     conn: Optional[ConnOpts],
     reuse_stats: bool,
 ) -> tuple[list[dict[str, Any]], list[PreparedRunWork]]:
-    """Refresh stats as needed and prepare dataset work for the run.
+    """Prepare all dataset work, then refresh stats as needed.
 
     The returned dataset contexts are written to run.json.  The PreparedRunWork
     objects are consumed by the warmup/measured execution loop.
@@ -189,14 +189,13 @@ def prepare_dataset_work(
 
     dataset_contexts: list[dict[str, Any]] = []
     prepared_runs: list[PreparedRunWork] = []
-    processed_dbs: set[str] = set()
+    dbs_to_refresh: list[str] = []
+    seen_dbs: set[str] = set()
 
     for spec in resolved_runs:
-        if spec.db not in processed_dbs:
-            # Multiple dataset entries can target the same database; refresh it once.
-            if not reuse_stats:
-                stabilize_db(spec.db, conn)
-            processed_dbs.add(spec.db)
+        if spec.db not in seen_dbs:
+            dbs_to_refresh.append(spec.db)
+            seen_dbs.add(spec.db)
 
         queries = select_queries(spec)
         query_statements = [
@@ -222,6 +221,11 @@ def prepare_dataset_work(
                 query_statements=query_statements,
             )
         )
+
+    # Refresh only after all selected SQL is known to be loadable.
+    if not reuse_stats:
+        for db in dbs_to_refresh:
+            stabilize_db(db, conn)
 
     return dataset_contexts, prepared_runs
 

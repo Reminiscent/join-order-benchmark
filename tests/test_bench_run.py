@@ -89,10 +89,30 @@ class RunScenarioTests(unittest.TestCase):
         stack.enter_context(patch.object(bench_run, "validate_required_gucs", Mock()))
         stabilize_mock = Mock()
         stack.enter_context(patch.object(bench_run, "stabilize_db", stabilize_mock))
-        stack.enter_context(patch.object(bench_run, "select_queries", Mock(return_value=queries or [self.make_query()])))
-        stack.enter_context(patch.object(bench_run, "load_sql_for_query", Mock(return_value="SELECT 1")))
-        stack.enter_context(patch.object(bench_run, "build_statement", Mock(side_effect=lambda _dataset, sql: sql)))
-        stack.enter_context(patch.object(bench_run, "write_summary_csv", Mock(side_effect=write_summary_csv_stub)))
+        stack.enter_context(
+            patch.object(
+                bench_run,
+                "select_queries",
+                Mock(return_value=queries or [self.make_query()]),
+            )
+        )
+        stack.enter_context(
+            patch.object(bench_run, "load_sql_for_query", Mock(return_value="SELECT 1"))
+        )
+        stack.enter_context(
+            patch.object(
+                bench_run,
+                "build_statement",
+                Mock(side_effect=lambda _dataset, sql: sql),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                bench_run,
+                "write_summary_csv",
+                Mock(side_effect=write_summary_csv_stub),
+            )
+        )
         run_one_mock = Mock(side_effect=run_one_side_effect)
         stack.enter_context(patch.object(bench_run, "run_one_statement", run_one_mock))
         return run_one_mock, stabilize_mock
@@ -116,7 +136,9 @@ class RunScenarioTests(unittest.TestCase):
             _, stabilize_mock = self.patch_run_environment(
                 stack,
                 outputs_dir,
-                bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
+                bench_exec.StatementTimeoutError(
+                    "ERROR: canceling statement due to statement timeout"
+                ),
                 warmup_runs=1,
             )
 
@@ -135,7 +157,11 @@ class RunScenarioTests(unittest.TestCase):
             raw_rows = self.read_raw_rows(run_dir)
             self.assertEqual(len(raw_rows), 1)
             self.assertEqual(raw_rows[0]["status"], "timeout")
-            self.assertTrue(raw_rows[0]["error"].startswith("skipped measured run after warmup timeout:"))
+            self.assertTrue(
+                raw_rows[0]["error"].startswith(
+                    "skipped measured run after warmup timeout:"
+                )
+            )
             self.assertEqual(run_context["warmup_failures"][0]["category"], "statement_timeout")
             self.assertNotIn("termination", run_context)
             stabilize_mock.assert_called_once_with("bench_job", None)
@@ -147,7 +173,9 @@ class RunScenarioTests(unittest.TestCase):
             self.patch_run_environment(
                 stack,
                 outputs_dir,
-                bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
+                bench_exec.StatementTimeoutError(
+                    "ERROR: canceling statement due to statement timeout"
+                ),
             )
 
             bench_run.run_scenario(
@@ -280,7 +308,9 @@ class RunScenarioTests(unittest.TestCase):
             run_one_mock, _ = self.patch_run_environment(
                 stack,
                 outputs_dir,
-                bench_exec.StatementTimeoutError("ERROR: canceling statement due to statement timeout"),
+                bench_exec.StatementTimeoutError(
+                    "ERROR: canceling statement due to statement timeout"
+                ),
                 measured_reps=2,
                 warmup_runs=1,
             )
@@ -351,6 +381,72 @@ class RunScenarioTests(unittest.TestCase):
             run_context = self.read_run_context(self.only_run_dir(outputs_dir))
             self.assertEqual(run_context["protocol"]["stats_refresh"], "reuse_existing")
 
+    def test_query_selection_failure_does_not_refresh_stats(self) -> None:
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            _, stabilize_mock = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                [metrics],
+            )
+            stack.enter_context(
+                patch.object(bench_run, "select_queries", Mock(side_effect=SystemExit(1)))
+            )
+
+            with self.assertRaises(SystemExit):
+                bench_run.run_scenario(
+                    self.make_scenario(),
+                    self.make_variant_registry(),
+                    ("dp",),
+                    self.make_resolved_runs(),
+                    conn=None,
+                    statement_timeout_ms=1000,
+                    tag="",
+                )
+
+            stabilize_mock.assert_not_called()
+
+    def test_sql_load_failure_does_not_refresh_stats(self) -> None:
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            _, stabilize_mock = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                [metrics],
+            )
+            stack.enter_context(
+                patch.object(bench_run, "load_sql_for_query", Mock(side_effect=SystemExit(1)))
+            )
+
+            with self.assertRaises(SystemExit):
+                bench_run.run_scenario(
+                    self.make_scenario(),
+                    self.make_variant_registry(),
+                    ("dp",),
+                    self.make_resolved_runs(),
+                    conn=None,
+                    statement_timeout_ms=1000,
+                    tag="",
+                )
+
+            stabilize_mock.assert_not_called()
+
     def test_guc_validation_only_checks_selected_variants(self) -> None:
         scenario = self.make_scenario()
         variants = {
@@ -372,7 +468,12 @@ class RunScenarioTests(unittest.TestCase):
     def test_query_group_warmup_runs_before_same_query_measured_reps(self) -> None:
         q1 = self.make_query_with_id("q1")
         q2 = self.make_query_with_id("q2")
-        metrics = bench_exec.RunMetrics(planning_ms=1.0, execution_ms=2.0, total_ms=3.0, plan_total_cost=4.0)
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
 
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"
@@ -386,7 +487,11 @@ class RunScenarioTests(unittest.TestCase):
                 warmup_runs=1,
             )
             stack.enter_context(
-                patch.object(bench_run, "load_sql_for_query", Mock(side_effect=lambda q: q.query_id))
+                patch.object(
+                    bench_run,
+                    "load_sql_for_query",
+                    Mock(side_effect=lambda q: q.query_id),
+                )
             )
 
             bench_run.run_scenario(
@@ -410,6 +515,78 @@ class RunScenarioTests(unittest.TestCase):
             self.assertEqual(
                 [(row["query_id"], row["rep"]) for row in raw_rows],
                 [("q1", "1"), ("q1", "2"), ("q2", "1"), ("q2", "2")],
+            )
+
+    def test_variant_order_rotates_across_queries_and_reps(self) -> None:
+        q1 = self.make_query_with_id("q1")
+        q2 = self.make_query_with_id("q2")
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
+        variants = {
+            "dp": Variant(name="dp", label="dp", session_gucs=()),
+            "geqo": Variant(name="geqo", label="GEQO", session_gucs=()),
+        }
+        resolved_runs = [
+            ResolvedDatasetRun(
+                dataset="job",
+                db="bench_job",
+                variants=("dp", "geqo"),
+            )
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            run_one_mock, _ = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                [metrics] * 12,
+                queries=[q1, q2],
+                measured_reps=2,
+                warmup_runs=1,
+            )
+            stack.enter_context(
+                patch.object(
+                    bench_run,
+                    "load_sql_for_query",
+                    Mock(side_effect=lambda q: q.query_id),
+                )
+            )
+
+            bench_run.run_scenario(
+                self.make_scenario(),
+                variants,
+                ("dp", "geqo"),
+                resolved_runs,
+                conn=None,
+                statement_timeout_ms=1000,
+                tag="",
+            )
+
+            observed_order = [
+                (call.args[3], call.args[2].name)
+                for call in run_one_mock.call_args_list
+            ]
+            self.assertEqual(
+                observed_order,
+                [
+                    ("q1", "dp"),
+                    ("q1", "geqo"),
+                    ("q1", "dp"),
+                    ("q1", "geqo"),
+                    ("q1", "geqo"),
+                    ("q1", "dp"),
+                    ("q2", "geqo"),
+                    ("q2", "dp"),
+                    ("q2", "geqo"),
+                    ("q2", "dp"),
+                    ("q2", "dp"),
+                    ("q2", "geqo"),
+                ],
             )
 
 if __name__ == "__main__":
