@@ -590,6 +590,7 @@ def flush_outputs(
         summary_path,
         resolved_runs=resolved_runs,
         summary_acc=state.summary_acc,
+        measured_reps=MEASURED_REPS,
     )
 
     # run.json captures configuration/protocol metadata plus the latest failure state.

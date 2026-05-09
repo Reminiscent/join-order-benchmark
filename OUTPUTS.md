@@ -134,10 +134,10 @@ Columns:
 | Column | Meaning |
 | --- | --- |
 | `dataset`, `query_id`, `join_size`, `variant` | Query and variant identifiers needed for reviewer tables. |
-| `planning_ms_median` | Median `planning_ms` over successful measured repetitions. |
-| `execution_ms_median` | Median `execution_ms` over successful measured repetitions. |
-| `total_ms_median` | Median `total_ms` over successful measured repetitions. |
-| `plan_total_cost_median` | Median `plan_total_cost` over successful measured repetitions. |
+| `planning_ms_median` | `planning_ms` from the successful repetition selected by median `total_ms`. |
+| `execution_ms_median` | `execution_ms` from the successful repetition selected by median `total_ms`. |
+| `total_ms_median` | Observed `total_ms` from the selected median-total successful repetition. |
+| `plan_total_cost_median` | Root plan `Total Cost` from the successful repetition selected by median `total_ms`. |
 | `ok_reps` | Number of successful measured repetitions. |
 | `timeout_reps` | Number of measured rows whose status is `timeout`. |
 | `error_reps` | Number of measured rows whose status is `error`. |
@@ -145,8 +145,10 @@ Columns:
 `join_size` is the base-relation count recorded in
 [tools/query_manifest.csv](tools/query_manifest.csv).
 
-If a query/variant has no successful measured repetition, the median columns are
-empty and `ok_reps` is `0`.
+Metric columns are populated only for complete query/variant results.  For
+those rows, all metrics come from the successful repetition with median
+`total_ms`.  Incomplete rows leave metric columns empty and keep only `ok_reps`,
+`timeout_reps`, and `error_reps`.
 
 Use `summary.csv` for per-query ratio tables and reviewer table rendering.
 
@@ -184,7 +186,7 @@ headers use variant labels recorded in `run.json`.
 
 ### Example Table Shape
 
-Suppose `summary.csv` contains these median execution times:
+Suppose `summary.csv` contains these representative execution times:
 
 | dataset | query | joins | dp | geqo | my_algo |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -208,7 +210,8 @@ My Algorithm/dp SUM = (150.00 + 80.00) / (200.00 + 100.00) = 0.77
 My Algorithm/GEQO SUM = (150.00 + 80.00) / (260.00 + 110.00) = 0.62
 ```
 
-The planning sheet uses the same layout with `planning_ms_median` values.
+The planning sheet uses the same layout with `planning_ms_median` values from
+the same median-total repetitions.
 
 ### Ratio Colors
 

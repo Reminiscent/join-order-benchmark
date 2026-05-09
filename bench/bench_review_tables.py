@@ -191,9 +191,9 @@ def ratio_style_key(value: float | None) -> str:
 def metric_value(row: SummaryRow | None, metric_column: str) -> float | None:
     """Return the metric for a completed query row.
 
-    Rows without successful repetitions are hidden from totals and ratios.
+    Rows without a complete metric sample are hidden from totals and ratios.
     """
-    if row is None or row.ok_reps <= 0:
+    if row is None:
         return None
     return row.metric_value(metric_column)
 
@@ -535,7 +535,7 @@ def write_review_worksheet(workbook: Any, worksheet: Any, table: ReviewTable) ->
         value_start,
         3,
         value_end,
-        f"median {table.metric_title.lower()} (ms)",
+        f"{table.metric_title} at median total time (ms)",
         formats["value_header"],
     )
     if table.ratio_pairs:

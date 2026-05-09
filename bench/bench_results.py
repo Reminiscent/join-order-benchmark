@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import csv
 import json
-import statistics
 from pathlib import Path
 from typing import Any
 
@@ -74,11 +73,13 @@ def write_summary_csv(
     *,
     resolved_runs: list[Any],
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]],
+    measured_reps: int,
 ) -> None:
-    """Write one median/failure-count row per dataset/query/variant.
+    """Write one representative metric/failure-count row per dataset/query/variant.
 
-    Only successful repetitions contribute metric medians; timeout and error
-    repetitions are counted separately for diagnostics.
+    Complete query/variant results use the successful repetition with median
+    total time for all metrics.  Incomplete results keep only success and
+    failure counts.
     """
     with summary_path.open("w", newline="") as f:
         writer = csv.DictWriter(
@@ -106,16 +107,34 @@ def write_summary_csv(
                         "timeout_reps": str(timeout_reps),
                         "error_reps": str(error_reps),
                     }
-                    if ok:
+                    complete_success = (
+                        measured_reps > 0
+                        and len(vals) == measured_reps
+                        and ok_reps == measured_reps
+                    )
+                    if complete_success:
+                        median_entry = _median_total_repetition(ok)
                         row.update(
                             {
-                                summary_field: f"{statistics.median(float(entry[source_field]) for entry in ok):.3f}"
+                                summary_field: f"{float(median_entry[source_field]):.3f}"
                                 for summary_field, source_field in SUMMARY_METRIC_FIELDS
                             }
                         )
                     else:
                         row.update({summary_field: "" for summary_field, _ in SUMMARY_METRIC_FIELDS})
                     writer.writerow(row)
+
+
+def _median_total_repetition(ok_entries: list[dict[str, object]]) -> dict[str, object]:
+    """Return the successful repetition with median total time."""
+    ordered = sorted(
+        ok_entries,
+        key=lambda entry: (
+            float(entry["total_ms"]),
+            int(entry.get("rep", 0)),
+        ),
+    )
+    return ordered[len(ordered) // 2]
 
 
 # run.json artifact helpers.
