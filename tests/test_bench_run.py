@@ -90,6 +90,14 @@ class RunScenarioTests(unittest.TestCase):
         stack.enter_context(patch.object(bench_run, "validate_session_gucs", Mock()))
         stabilize_mock = Mock()
         stack.enter_context(patch.object(bench_run, "stabilize_db", stabilize_mock))
+
+        def fake_dump_statistics(_db: str, path: Path, _conn: object) -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+        self.dump_statistics_mock = Mock(side_effect=fake_dump_statistics)
+        stack.enter_context(
+            patch.object(bench_run, "dump_statistics", self.dump_statistics_mock)
+        )
         stack.enter_context(
             patch.object(
                 bench_run,
@@ -419,8 +427,98 @@ class RunScenarioTests(unittest.TestCase):
             )
 
             stabilize_mock.assert_not_called()
-            run_context = self.read_run_context(self.only_run_dir(outputs_dir))
+            run_dir = self.only_run_dir(outputs_dir)
+            self.dump_statistics_mock.assert_called_once_with(
+                "bench_job",
+                run_dir / "stats" / "bench_job.sql",
+                None,
+            )
+            self.assertTrue((run_dir / "stats").is_dir())
+            run_context = self.read_run_context(run_dir)
             self.assertEqual(run_context["protocol"]["stats_refresh"], "reuse_existing")
+
+    def test_run_dumps_statistics_after_refresh(self) -> None:
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            _, stabilize_mock = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                [metrics],
+            )
+            events: list[str] = []
+            stabilize_mock.side_effect = lambda _db, _conn: events.append("stabilize")
+
+            def record_dump_statistics(_db: str, path: Path, _conn: object) -> None:
+                events.append("dump")
+                path.parent.mkdir(parents=True, exist_ok=True)
+
+            self.dump_statistics_mock.side_effect = record_dump_statistics
+
+            bench_run.run_scenario(
+                self.make_scenario(),
+                self.make_variant_registry(),
+                ("dp",),
+                self.make_resolved_runs(),
+                conn=None,
+                run_session_gucs=self.make_run_session_gucs(),
+                tag="",
+            )
+
+            run_dir = self.only_run_dir(outputs_dir)
+            self.assertEqual(events, ["stabilize", "dump"])
+            stabilize_mock.assert_called_once_with("bench_job", None)
+            self.dump_statistics_mock.assert_called_once_with(
+                "bench_job",
+                run_dir / "stats" / "bench_job.sql",
+                None,
+            )
+
+    def test_shared_database_statistics_are_dumped_once(self) -> None:
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
+        resolved_runs = [
+            ResolvedDatasetRun(dataset="job", db="bench_job", variants=("dp",)),
+            ResolvedDatasetRun(dataset="job_complex", db="bench_job", variants=("dp",)),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            _, stabilize_mock = self.patch_run_environment(
+                stack,
+                outputs_dir,
+                [metrics, metrics],
+            )
+
+            bench_run.run_scenario(
+                self.make_scenario(),
+                self.make_variant_registry(),
+                ("dp",),
+                resolved_runs,
+                conn=None,
+                run_session_gucs=self.make_run_session_gucs(),
+                tag="",
+            )
+
+            run_dir = self.only_run_dir(outputs_dir)
+            stabilize_mock.assert_called_once_with("bench_job", None)
+            self.dump_statistics_mock.assert_called_once_with(
+                "bench_job",
+                run_dir / "stats" / "bench_job.sql",
+                None,
+            )
 
     def test_query_selection_failure_does_not_refresh_stats(self) -> None:
         metrics = bench_exec.RunMetrics(
@@ -454,6 +552,7 @@ class RunScenarioTests(unittest.TestCase):
                 )
 
             stabilize_mock.assert_not_called()
+            self.dump_statistics_mock.assert_not_called()
 
     def test_sql_load_failure_does_not_refresh_stats(self) -> None:
         metrics = bench_exec.RunMetrics(
@@ -487,6 +586,7 @@ class RunScenarioTests(unittest.TestCase):
                 )
 
             stabilize_mock.assert_not_called()
+            self.dump_statistics_mock.assert_not_called()
 
     def test_guc_validation_only_sets_selected_variants(self) -> None:
         run_session_gucs = (("join_collapse_limit", 100),)

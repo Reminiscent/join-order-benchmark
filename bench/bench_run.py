@@ -1,6 +1,6 @@
 """Scenario runner for benchmark execution.
 
-This module coordinates statistics refresh, query selection, warmup/measured
+This module coordinates statistics setup, query selection, warmup/measured
 execution, timeout classification, and artifact flushing for one run.
 """
 
@@ -23,6 +23,7 @@ from bench_common import (
 )
 from bench_exec import (
     StatementTimeoutError,
+    dump_statistics,
     ensure_databases_reachable,
     run_one_statement,
     stabilize_db,
@@ -90,10 +91,10 @@ def run_scenario(
     """Execute one resolved benchmark scenario and write run artifacts.
 
     Each invocation creates a new output directory.  By default, the runner
-    stabilizes each target database before executing queries, writes
-    ``raw.csv``, ``summary.csv``, and ``run.json`` as work completes, records
-    ``statement_timeout`` as benchmark data, and exits non-zero on non-timeout
-    query-execution errors after writing the current artifacts.
+    refreshes or reuses database statistics before executing queries, writes
+    local artifacts as work completes, records ``statement_timeout`` as
+    benchmark data, and exits non-zero on non-timeout query-execution errors
+    after writing the current artifacts.
     """
 
     stats_refresh = "reuse_existing" if reuse_stats else "before_run"
@@ -127,12 +128,13 @@ def run_scenario(
     print(f"[run] stats_refresh={stats_refresh}")
     print(f"[run] outputs={out_dir}")
 
-    # Stage 3: select/load all query work, then refresh stats once per database.
+    # Stage 3: select/load all query work, then refresh stats if needed and dump them.
     dataset_contexts, prepared_runs = prepare_dataset_work(
         resolved_runs=resolved_runs,
         variants_registry=variants_registry,
         conn=conn,
         reuse_stats=reuse_stats,
+        stats_dir=out_dir / "stats",
     )
 
     # Stage 4: write the initial artifacts so the output directory immediately
@@ -177,8 +179,9 @@ def prepare_dataset_work(
     variants_registry: dict[str, Variant],
     conn: Optional[ConnOpts],
     reuse_stats: bool,
+    stats_dir: Path,
 ) -> tuple[list[dict[str, Any]], list[PreparedRunWork]]:
-    """Prepare all dataset work, then refresh stats as needed.
+    """Prepare dataset work, then refresh stats if needed and dump them.
 
     The returned dataset contexts are written to run.json.  The PreparedRunWork
     objects are consumed by the warmup/measured execution loop.
@@ -186,12 +189,12 @@ def prepare_dataset_work(
 
     dataset_contexts: list[dict[str, Any]] = []
     prepared_runs: list[PreparedRunWork] = []
-    dbs_to_refresh: list[str] = []
+    distinct_dbs: list[str] = []
     seen_dbs: set[str] = set()
 
     for spec in resolved_runs:
         if spec.db not in seen_dbs:
-            dbs_to_refresh.append(spec.db)
+            distinct_dbs.append(spec.db)
             seen_dbs.add(spec.db)
 
         queries = select_queries(spec)
@@ -221,10 +224,28 @@ def prepare_dataset_work(
 
     # Refresh only after all selected SQL is known to be loadable.
     if not reuse_stats:
-        for db in dbs_to_refresh:
+        for db in distinct_dbs:
             stabilize_db(db, conn)
 
+    dump_run_statistics(distinct_dbs, stats_dir, conn)
+
     return dataset_contexts, prepared_runs
+
+
+# Statistics artifact dumping.
+
+
+def dump_run_statistics(
+    dbs: list[str],
+    stats_dir: Path,
+    conn: Optional[ConnOpts],
+) -> None:
+    """Dump one statistics restore script per physical benchmark database."""
+
+    for db in dbs:
+        path = stats_dir / f"{safe_artifact_name(db)}.sql"
+        dump_statistics(db, path, conn)
+        print(f"[run] stats_dump db={db} path={path}")
 
 
 # Warmup and measured execution.

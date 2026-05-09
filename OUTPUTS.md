@@ -14,6 +14,7 @@ outputs/<run_id>/
   raw.csv
   summary.csv
   plans/
+  stats/
 ```
 
 `<run_id>` is generated as:
@@ -165,6 +166,24 @@ plans/<dataset>/<query_id>/<variant>.json
 No plan file is written for warmup, timeout, error, or incomplete
 query/variant results.  Use these files when a result row needs plan-level
 inspection or when comparing plan changes across separate runs.
+
+## `stats/`
+
+`stats/` stores one native PostgreSQL statistics-only dump per physical
+benchmark database:
+
+```text
+stats/<db>.sql
+```
+
+Each file is generated with:
+
+```bash
+pg_dump --statistics-only -d <db> -f stats/<db>.sql
+```
+
+Default runs dump after `VACUUM FREEZE ANALYZE` and the best-effort
+`CHECKPOINT`; `--reuse-stats` runs dump the existing statistics.
 
 ## Reviewer Tables
 

@@ -1,7 +1,8 @@
 """Shared dataclasses, paths, and subprocess helpers for the benchmark harness.
 
 The other ``bench_*`` modules import these primitives instead of duplicating
-connection handling, SQL quoting, and artifact-name logic.
+connection handling, PostgreSQL command construction, SQL quoting, and
+artifact-name logic.
 """
 
 from __future__ import annotations
@@ -123,6 +124,12 @@ def psql_cmd(db: str, conn: Optional[ConnOpts] = None) -> list[str]:
     """Build the standard non-interactive ``psql`` command for one database."""
     c = conn or ConnOpts()
     return ["psql", "-X", "-q", "-P", "pager=off", "-v", "ON_ERROR_STOP=1", *c.to_args(), "-d", db]
+
+
+def pg_dump_cmd(db: str, conn: Optional[ConnOpts] = None) -> list[str]:
+    """Build a ``pg_dump`` command prefix for one database."""
+    c = conn or ConnOpts()
+    return ["pg_dump", *c.to_args(), "-d", db]
 
 
 def psql_sql(

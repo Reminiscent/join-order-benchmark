@@ -1,19 +1,21 @@
 """PostgreSQL execution helpers for benchmark runs.
 
 This module owns per-statement session setup, ``EXPLAIN ANALYZE`` execution,
-GUC validation, statistics refresh, and parsing of ``psql`` output.
+GUC validation, statistics maintenance, and parsing of ``psql`` output.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Optional
 
 from bench_common import (
     ConnOpts,
     Variant,
     die,
+    pg_dump_cmd,
     psql_cmd,
     psql_sql,
     psql_sql_raw,
@@ -158,7 +160,7 @@ def parse_explain_json(payload: str) -> RunMetrics:
     )
 
 
-# Run setup and validation.
+# Database statistics maintenance and export.
 
 
 def stabilize_db(
@@ -175,6 +177,20 @@ def stabilize_db(
 
     psql_sql(db, "VACUUM FREEZE ANALYZE;", conn=conn, check=True)
     psql_sql(db, "CHECKPOINT;", conn=conn, check=False)
+
+
+def dump_statistics(
+    db: str,
+    path: Path,
+    conn: Optional[ConnOpts] = None,
+) -> None:
+    """Dump current database statistics to a native SQL restore script."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    run_cmd(pg_dump_cmd(db, conn) + ["--statistics-only", "-f", str(path)], check=True)
+
+
+# Run setup validation.
 
 
 def ensure_databases_reachable(dbs: list[str], conn: Optional[ConnOpts] = None) -> None:

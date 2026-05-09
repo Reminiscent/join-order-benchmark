@@ -29,10 +29,10 @@ discussion.
 
 ## Quick Run
 
-Requirements: Python 3.11+, `psql` in `PATH`, a reachable PostgreSQL instance,
-a database role that can create benchmark databases, and the IMDB CSV bundle
-for IMDB-backed workloads.  Public runs also configure `shared_buffers=4GB`
-before measurement; see [REPRODUCE.md](REPRODUCE.md) and
+Requirements: Python 3.11+, `psql` and `pg_dump` in `PATH`, a reachable
+PostgreSQL instance, a database role that can create benchmark databases, and
+the IMDB CSV bundle for IMDB-backed workloads.  Public runs also configure
+`shared_buffers=4GB` before measurement; see [REPRODUCE.md](REPRODUCE.md) and
 [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) for the full checklist.
 
 Prepare data and run the primary scenario with the baseline variants:
@@ -64,6 +64,7 @@ outputs/<run_id>/
   raw.csv
   summary.csv
   plans/
+  stats/
 ```
 
 Install `XlsxWriter` if needed, then create the reviewer workbook:

@@ -9,7 +9,7 @@ For artifact formats and reviewer workbook details, see [OUTPUTS.md](OUTPUTS.md)
 You need:
 
 - a reachable PostgreSQL instance
-- `psql` in `PATH`
+- `psql` and `pg_dump` in `PATH`
 - Python 3.11 or newer
 - the external IMDB CSV bundle for IMDB-backed workloads
 - a database role that can connect to the `postgres` maintenance database and
@@ -127,6 +127,8 @@ recorded in [tools/query_manifest.csv](tools/query_manifest.csv).  For example,
 
 By default, each `run` refreshes table statistics once per distinct database
 with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.
+It also writes one statistics-only dump per physical database under
+`outputs/<run_id>/stats/`.
 
 When comparing separate runs that only change algorithm parameters, run one
 baseline normally, then pass `--reuse-stats` to later runs so they reuse the
@@ -140,6 +142,20 @@ python3 bench/bench.py run extended --variants my_algo_p2 --min-join 12 --reuse-
 Do not run `prepare`, recreate data, or run `ANALYZE` between runs if the
 comparison depends on stable statistics.
 
+To restore a saved statistics snapshot on a freshly prepared database:
+
+```bash
+python3 bench/bench.py prepare extended --csv-dir /path/to/imdb_csv
+psql -d imdb_bench -c "VACUUM FREEZE ANALYZE;"
+psql -d imdb_bench -c "CHECKPOINT;"
+psql -d imdb_bench -f outputs/<source_run>/stats/imdb_bench.sql
+python3 bench/bench.py run extended --reuse-stats --variants my_algo_p2 --tag p2
+```
+
+Run `VACUUM FREEZE ANALYZE` and `CHECKPOINT` before `psql -f` to match the
+normal harness flow.  Do not run `ANALYZE` afterwards; it would replace the
+imported statistics.
+
 ## Reviewer Workbook
 
 Each run writes local artifacts under `outputs/<run_id>/`:
@@ -150,6 +166,7 @@ outputs/<run_id>/
   raw.csv
   summary.csv
   plans/
+  stats/
 ```
 
 Create the reviewer workbook from an existing run:
