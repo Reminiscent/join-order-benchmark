@@ -5,7 +5,7 @@ import json
 import sys
 import tempfile
 import unittest
-from contextlib import ExitStack, redirect_stderr
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
@@ -202,6 +202,38 @@ class RunScenarioTests(unittest.TestCase):
             self.assertEqual(len(raw_rows), 1)
             self.assertEqual(raw_rows[0]["status"], "timeout")
 
+    def test_run_records_elapsed_seconds_in_run_context_and_console(self) -> None:
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
+            outputs_dir = Path(tmpdir) / "outputs"
+            outputs_dir.mkdir()
+            self.patch_run_environment(stack, outputs_dir, [metrics])
+            stack.enter_context(
+                patch.object(bench_run.time, "perf_counter", Mock(side_effect=[10.0, 12.3456]))
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                bench_run.run_scenario(
+                    self.make_scenario(),
+                    self.make_variant_registry(),
+                    ("dp",),
+                    self.make_resolved_runs(),
+                    conn=None,
+                    run_session_gucs=self.make_run_session_gucs(),
+                    tag="",
+                )
+
+            run_context = self.read_run_context(self.only_run_dir(outputs_dir))
+            self.assertEqual(run_context["elapsed_seconds"], 2.346)
+            self.assertIn("[run] elapsed_seconds=2.346", stdout.getvalue())
+
     def test_measured_summary_entry_keeps_explain_json(self) -> None:
         metrics = bench_exec.RunMetrics(
             planning_ms=1.0,
@@ -245,8 +277,12 @@ class RunScenarioTests(unittest.TestCase):
                 RuntimeError("ERROR: planner blew up"),
                 warmup_runs=1,
             )
+            stack.enter_context(
+                patch.object(bench_run.time, "perf_counter", Mock(side_effect=[20.0, 25.0]))
+            )
 
-            with self.assertRaises(SystemExit) as ctx:
+            stdout = StringIO()
+            with redirect_stdout(stdout), self.assertRaises(SystemExit) as ctx:
                 bench_run.run_scenario(
                     self.make_scenario(),
                     self.make_variant_registry(),
@@ -262,6 +298,8 @@ class RunScenarioTests(unittest.TestCase):
             run_context = self.read_run_context(run_dir)
             self.assertEqual(run_context["termination"]["phase"], "warmup")
             self.assertEqual(run_context["termination"]["category"], "error")
+            self.assertEqual(run_context["elapsed_seconds"], 5.0)
+            self.assertIn("[run] elapsed_seconds=5.000", stdout.getvalue())
             self.assertTrue((run_dir / "summary.csv").is_file())
             self.assertTrue((run_dir / "run.json").is_file())
 

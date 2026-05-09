@@ -6,6 +6,7 @@ execution, timeout classification, and artifact flushing for one run.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -53,6 +54,7 @@ class RunState:
     warmup_failures: list[dict[str, Any]] = field(default_factory=list)
     warmup_timeout_keys: set[tuple[str, str, str]] = field(default_factory=set)
     termination: dict[str, Any] | None = None
+    elapsed_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,7 @@ def run_scenario(
     after writing the current artifacts.
     """
 
+    started_at = time.perf_counter()
     stats_refresh = "reuse_existing" if reuse_stats else "before_run"
 
     # Stage 1: create the output directory and verify that the target PostgreSQL
@@ -166,7 +169,9 @@ def run_scenario(
         write_current_artifacts=write_current_artifacts,
     )
 
-    # Stage 6: summarize failures after the latest artifact flush.
+    # Stage 6: persist final run-level duration, then summarize failures.
+    state.elapsed_seconds = round(time.perf_counter() - started_at, 3)
+    write_current_artifacts()
     summarize_run_completion(state)
 
 
@@ -556,6 +561,8 @@ def summarize_run_completion(state: RunState) -> None:
     print_failure_rows(label="warmup_errors", rows=warmup_error_rows)
     print_failure_rows(label="skipped_timeouts", rows=skipped_timeout_rows)
     print_failure_rows(label="timeouts", rows=timeout_rows)
+    if state.elapsed_seconds is not None:
+        print(f"[run] elapsed_seconds={state.elapsed_seconds:.3f}")
 
     if state.termination is not None:
         print(
@@ -634,5 +641,7 @@ def flush_outputs(
         run_context["warmup_failures"] = state.warmup_failures
     if state.termination is not None:
         run_context["termination"] = state.termination
+    if state.elapsed_seconds is not None:
+        run_context["elapsed_seconds"] = state.elapsed_seconds
 
     write_run_context(out_dir / "run.json", run_context)
