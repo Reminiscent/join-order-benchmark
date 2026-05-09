@@ -63,6 +63,7 @@ outputs/<run_id>/
   run.json
   raw.csv
   summary.csv
+  plans/
 ```
 
 Install `XlsxWriter` if needed, then create the reviewer workbook:

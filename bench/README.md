@@ -14,7 +14,7 @@ the public benchmark protocol; use this file as the code map.
 | [bench_prepare.py](bench_prepare.py) | Database recreation and dataset loading for `bench.py prepare`. |
 | [bench_run.py](bench_run.py) | Run orchestration: output directory setup, database/GUC checks, statistics stabilization, warmup/measured groups, and artifact flushes. |
 | [bench_exec.py](bench_exec.py) | One PostgreSQL statement execution path: session prelude, `EXPLAIN ANALYZE` JSON, timing/cost parsing, and `statement_timeout` classification. |
-| [bench_results.py](bench_results.py) | Output schemas and writers for `run.json`, `raw.csv`, and `summary.csv`. |
+| [bench_results.py](bench_results.py) | Output schemas and writers for `run.json`, `raw.csv`, `summary.csv`, and `plans/`. |
 | [bench_review_tables.py](bench_review_tables.py) | Optional `review.xlsx` rendering from an existing run; not needed to understand the run protocol. |
 
 ## Data Flow
@@ -47,7 +47,7 @@ bench.py run
          [bench_exec.py]
          collect per-repetition rows and summary inputs
          [bench_run.py]
-    -> write run.json, raw.csv, and summary.csv
+    -> write run.json, raw.csv, summary.csv, and median-repetition plans
        [bench_results.py]
 ```
 

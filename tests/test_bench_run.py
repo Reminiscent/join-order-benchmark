@@ -194,6 +194,39 @@ class RunScenarioTests(unittest.TestCase):
             self.assertEqual(len(raw_rows), 1)
             self.assertEqual(raw_rows[0]["status"], "timeout")
 
+    def test_measured_summary_entry_keeps_explain_json(self) -> None:
+        metrics = bench_exec.RunMetrics(
+            planning_ms=1.0,
+            execution_ms=2.0,
+            total_ms=3.0,
+            plan_total_cost=4.0,
+            explain_json='[{"Plan":{"Node Type":"Hash Join"}}]',
+        )
+        raw_rows: list[dict[str, str]] = []
+        summary_acc: dict[tuple[str, str, str], list[dict[str, object]]] = {}
+
+        with patch.object(bench_run, "run_one_statement", Mock(return_value=metrics)):
+            termination = bench_run.execute_measured_group(
+                spec=self.make_resolved_runs()[0],
+                query=self.make_query(),
+                stmt="SELECT 1",
+                query_idx=0,
+                rep=1,
+                selected_variants=[self.make_variant_registry()["dp"]],
+                conn=None,
+                run_session_gucs=self.make_run_session_gucs(),
+                warmup_timeout_keys=set(),
+                raw_rows=raw_rows,
+                summary_acc=summary_acc,
+            )
+
+        self.assertIsNone(termination)
+        self.assertEqual(raw_rows[0]["status"], "ok")
+        self.assertEqual(
+            summary_acc[("job", "q1", "dp")][0]["explain_json"],
+            '[{"Plan":{"Node Type":"Hash Join"}}]',
+        )
+
     def test_warmup_error_writes_outputs_before_exit(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, ExitStack() as stack:
             outputs_dir = Path(tmpdir) / "outputs"

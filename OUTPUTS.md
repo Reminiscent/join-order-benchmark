@@ -13,6 +13,7 @@ outputs/<run_id>/
   run.json
   raw.csv
   summary.csv
+  plans/
 ```
 
 `<run_id>` is generated as:
@@ -151,6 +152,19 @@ those rows, all metrics come from the successful repetition with median
 `timeout_reps`, and `error_reps`.
 
 Use `summary.csv` for per-query ratio tables and reviewer table rendering.
+
+## `plans/`
+
+`plans/` stores the full `EXPLAIN ANALYZE FORMAT JSON` output for the same
+successful measured repetition used by `summary.csv` metrics:
+
+```text
+plans/<dataset>/<query_id>/<variant>.json
+```
+
+No plan file is written for warmup, timeout, error, or incomplete
+query/variant results.  Use these files when a result row needs plan-level
+inspection or when comparing plan changes across separate runs.
 
 ## Reviewer Tables
 

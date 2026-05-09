@@ -27,12 +27,13 @@ from bench_common import (
 
 @dataclass(frozen=True)
 class RunMetrics:
-    """Timing and optimizer-cost fields extracted from EXPLAIN JSON output."""
+    """Timing, optimizer-cost, and raw EXPLAIN JSON output for one run."""
 
     planning_ms: float
     execution_ms: float
     total_ms: float
     plan_total_cost: float
+    explain_json: str = ""
 
 
 class StatementTimeoutError(RuntimeError):
@@ -153,6 +154,7 @@ def parse_explain_json(payload: str) -> RunMetrics:
         execution_ms=execution_ms,
         total_ms=total_ms,
         plan_total_cost=plan_total_cost,
+        explain_json=payload,
     )
 
 

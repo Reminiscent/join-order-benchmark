@@ -381,6 +381,7 @@ def execute_measured_group(
         total_ms = -1.0
         exec_ms = -1.0
         plan_total_cost = -1.0
+        explain_json = ""
 
         if key in warmup_timeout_keys:
             # Avoid spending measured reps on a query/variant that already timed out.
@@ -399,6 +400,7 @@ def execute_measured_group(
                 total_ms = metrics.total_ms
                 plan_total_cost = metrics.plan_total_cost
                 exec_ms = metrics.execution_ms
+                explain_json = metrics.explain_json
             except StatementTimeoutError as e:
                 # A measured timeout is reported but does not abort the benchmark run.
                 status = "timeout"
@@ -442,6 +444,7 @@ def execute_measured_group(
                 "total_ms": total_ms,
                 "execution_ms": exec_ms,
                 "plan_total_cost": plan_total_cost,
+                "explain_json": explain_json,
                 "status": status,
             }
         )
@@ -591,6 +594,7 @@ def flush_outputs(
         resolved_runs=resolved_runs,
         summary_acc=state.summary_acc,
         measured_reps=MEASURED_REPS,
+        plans_dir=out_dir / "plans",
     )
 
     # run.json captures configuration/protocol metadata plus the latest failure state.

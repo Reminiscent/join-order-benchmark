@@ -149,6 +149,7 @@ outputs/<run_id>/
   run.json
   raw.csv
   summary.csv
+  plans/
 ```
 
 Create the reviewer workbook from an existing run:

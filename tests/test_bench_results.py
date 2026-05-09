@@ -37,6 +37,7 @@ class BenchResultsTests(unittest.TestCase):
                     "execution_ms": 10.0,
                     "total_ms": 100.0,
                     "plan_total_cost": 300.0,
+                    "explain_json": '[{"Plan":{"Node Type":"Seq Scan","Plan Rows":300}}]',
                 },
                 {
                     "rep": 2,
@@ -45,6 +46,7 @@ class BenchResultsTests(unittest.TestCase):
                     "execution_ms": 19.0,
                     "total_ms": 20.0,
                     "plan_total_cost": 100.0,
+                    "explain_json": '[{"Plan":{"Node Type":"Hash Join","Plan Rows":100}}]',
                 },
                 {
                     "rep": 3,
@@ -53,22 +55,27 @@ class BenchResultsTests(unittest.TestCase):
                     "execution_ms": 6.0,
                     "total_ms": 10.0,
                     "plan_total_cost": 200.0,
+                    "explain_json": '[{"Plan":{"Node Type":"Nested Loop","Plan Rows":200}}]',
                 },
             ]
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            summary_path = Path(tmpdir) / "summary.csv"
+            tmp_path = Path(tmpdir)
+            summary_path = tmp_path / "summary.csv"
+            plans_dir = tmp_path / "plans"
             with patch.object(bench_results, "select_queries", Mock(return_value=[query])):
                 bench_results.write_summary_csv(
                     summary_path,
                     resolved_runs=[spec],
                     summary_acc=summary_acc,
                     measured_reps=3,
+                    plans_dir=plans_dir,
                 )
 
             with summary_path.open(newline="") as f:
                 rows = list(csv.DictReader(f))
+            plan_text = (plans_dir / "job" / "q1" / "dp.json").read_text()
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["planning_ms_median"], "1.000")
@@ -78,6 +85,7 @@ class BenchResultsTests(unittest.TestCase):
         self.assertEqual(rows[0]["ok_reps"], "3")
         self.assertEqual(rows[0]["timeout_reps"], "0")
         self.assertEqual(rows[0]["error_reps"], "0")
+        self.assertEqual(plan_text, '[{"Plan":{"Node Type":"Hash Join","Plan Rows":100}}]\n')
 
     def test_write_summary_csv_omits_metrics_for_partial_success(self) -> None:
         query = QueryMeta(
@@ -100,6 +108,7 @@ class BenchResultsTests(unittest.TestCase):
                     "execution_ms": 10.0,
                     "total_ms": 11.0,
                     "plan_total_cost": 100.0,
+                    "explain_json": '[{"Plan":{"Node Type":"Seq Scan"}}]',
                 },
                 {
                     "rep": 2,
@@ -108,23 +117,29 @@ class BenchResultsTests(unittest.TestCase):
                     "execution_ms": 30.0,
                     "total_ms": 33.0,
                     "plan_total_cost": 300.0,
+                    "explain_json": '[{"Plan":{"Node Type":"Hash Join"}}]',
                 },
                 {"status": "timeout"},
             ]
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            summary_path = Path(tmpdir) / "summary.csv"
+            tmp_path = Path(tmpdir)
+            summary_path = tmp_path / "summary.csv"
+            plans_dir = tmp_path / "plans"
             with patch.object(bench_results, "select_queries", Mock(return_value=[query])):
                 bench_results.write_summary_csv(
                     summary_path,
                     resolved_runs=[spec],
                     summary_acc=summary_acc,
                     measured_reps=3,
+                    plans_dir=plans_dir,
                 )
 
             with summary_path.open(newline="") as f:
                 rows = list(csv.DictReader(f))
+            plan_path = plans_dir / "job" / "q1" / "dp.json"
+            plan_exists = plan_path.exists()
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["planning_ms_median"], "")
@@ -134,6 +149,7 @@ class BenchResultsTests(unittest.TestCase):
         self.assertEqual(rows[0]["ok_reps"], "2")
         self.assertEqual(rows[0]["timeout_reps"], "1")
         self.assertEqual(rows[0]["error_reps"], "0")
+        self.assertFalse(plan_exists)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 """Artifact writers for benchmark run output.
 
-This module turns in-memory run rows into ``raw.csv``, ``summary.csv``, and
-``run.json`` so execution code does not own file-format details.
+This module turns in-memory run rows into ``raw.csv``, ``summary.csv``,
+``plans/``, and ``run.json`` so execution code does not own file-format
+details.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from bench_common import safe_artifact_name
 from bench_config import select_queries
 
 
@@ -74,6 +76,7 @@ def write_summary_csv(
     resolved_runs: list[Any],
     summary_acc: dict[tuple[str, str, str], list[dict[str, object]]],
     measured_reps: int,
+    plans_dir: Path | None = None,
 ) -> None:
     """Write one representative metric/failure-count row per dataset/query/variant.
 
@@ -81,6 +84,9 @@ def write_summary_csv(
     total time for all metrics.  Incomplete results keep only success and
     failure counts.
     """
+    if plans_dir is not None:
+        plans_dir.mkdir(parents=True, exist_ok=True)
+
     with summary_path.open("w", newline="") as f:
         writer = csv.DictWriter(
             f,
@@ -120,6 +126,14 @@ def write_summary_csv(
                                 for summary_field, source_field in SUMMARY_METRIC_FIELDS
                             }
                         )
+                        if plans_dir is not None:
+                            _write_plan_json(
+                                plans_dir,
+                                dataset=spec.dataset,
+                                query_id=q.query_id,
+                                variant_name=variant_name,
+                                median_entry=median_entry,
+                            )
                     else:
                         row.update({summary_field: "" for summary_field, _ in SUMMARY_METRIC_FIELDS})
                     writer.writerow(row)
@@ -135,6 +149,30 @@ def _median_total_repetition(ok_entries: list[dict[str, object]]) -> dict[str, o
         ),
     )
     return ordered[len(ordered) // 2]
+
+
+def _write_plan_json(
+    plans_dir: Path,
+    *,
+    dataset: str,
+    query_id: str,
+    variant_name: str,
+    median_entry: dict[str, object],
+) -> None:
+    """Write the full EXPLAIN JSON for the summary row's measured repetition."""
+
+    explain_json = median_entry.get("explain_json")
+    if not isinstance(explain_json, str) or not explain_json:
+        return
+
+    plan_path = (
+        plans_dir
+        / safe_artifact_name(dataset)
+        / safe_artifact_name(query_id)
+        / f"{safe_artifact_name(variant_name)}.json"
+    )
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(explain_json.rstrip() + "\n")
 
 
 # run.json artifact helpers.
