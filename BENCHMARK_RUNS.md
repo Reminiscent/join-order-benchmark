@@ -46,14 +46,14 @@ Scenario and dataset coverage is documented in [WORKLOADS.md](WORKLOADS.md).
    variant GUCs are valid.
 3. Select and load the exact query SQL for each dataset.
 4. Unless `--reuse-stats` is passed, stabilize each distinct target database
-   with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`.  Datasets that
-   share one database, such as `job` and `job_complex`, share this one step.
-5. Write the initial `run.json`, `raw.csv`, and `summary.csv` so the intended
-   run shape is visible even if the process is interrupted.
+   with `VACUUM FREEZE ANALYZE` and a best-effort `CHECKPOINT`; then dump one
+   statistics snapshot per distinct database under `stats/`.
+5. Write the initial artifacts so the intended run shape is visible even if the
+   process is interrupted.
 6. For each query group, run discarded warmup pass(es), then measured
    repetitions.
-7. Rewrite `run.json`, `raw.csv`, and `summary.csv` as each query group
-   finishes, or before exiting on a fatal error during query execution.
+7. Refresh artifacts after each query group, including summary-selected plan
+   files when available, or before exiting on a fatal query-execution error.
 
 [bench/bench_run.py](bench/bench_run.py) is the execution driver.  It keeps the
 main run loop ordered by dataset, query, warmup pass, repetition, and variant.
@@ -143,6 +143,8 @@ outputs/<run_id>/
   run.json
   raw.csv
   summary.csv
+  plans/
+  stats/
 ```
 
 Use [OUTPUTS.md](OUTPUTS.md) for column definitions, console-output semantics,

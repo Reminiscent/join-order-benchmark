@@ -9,7 +9,7 @@ For artifact formats and reviewer workbook details, see [OUTPUTS.md](OUTPUTS.md)
 You need:
 
 - a reachable PostgreSQL instance
-- `psql` and `pg_dump` in `PATH`
+- compatible PostgreSQL client tools (`psql`, `pg_dump`) in `PATH`
 - Python 3.11 or newer
 - the external IMDB CSV bundle for IMDB-backed workloads
 - a database role that can connect to the `postgres` maintenance database and

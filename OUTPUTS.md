@@ -43,6 +43,7 @@ During a run, the harness prints status and the output directory:
 [run] outputs=/path/to/join_order_benchmark/outputs/20260412_142110_777847_main
 [run] dataset=job db=imdb_bench queries=113 variants=dp,geqo,my_algo min_join=None
 [run] dataset=job_complex db=imdb_bench queries=30 variants=dp,geqo,my_algo min_join=None
+[run] stats_dump db=imdb_bench path=/path/to/join_order_benchmark/outputs/20260412_142110_777847_main/stats/imdb_bench.sql
 [run] completed without errors
 ```
 
