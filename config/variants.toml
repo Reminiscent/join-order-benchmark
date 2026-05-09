@@ -35,4 +35,4 @@ session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_s
 [[variant]]
 name = "hybrid_search"
 label = "Hybrid Search"
-session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on" }
+session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "hybrid" }
