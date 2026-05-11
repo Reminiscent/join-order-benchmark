@@ -19,6 +19,7 @@ METRICS = {
 }
 
 DEFAULT_METRICS = ("execution", "planning")
+REVIEW_TABLE_FONT = "Arial"
 XLSX_MISSING_DEPENDENCY = (
     "missing optional dependency: install XlsxWriter before rendering reviewer XLSX tables "
     "(for example: python3 -m pip install XlsxWriter)"
@@ -419,7 +420,7 @@ def xlsx_formats(workbook: Any) -> dict[str, Any]:
     border = {
         "border": 1,
         "border_color": "#D1D5DB",
-        "font_name": "Aptos",
+        "font_name": REVIEW_TABLE_FONT,
         "font_size": 11,
         "valign": "vcenter",
     }
@@ -435,9 +436,9 @@ def xlsx_formats(workbook: Any) -> dict[str, Any]:
 
     return {
         "title": workbook.add_format(
-            {"font_name": "Aptos", "font_size": 14, "bold": True, "valign": "vcenter"}
+            {"font_name": REVIEW_TABLE_FONT, "font_size": 14, "bold": True, "valign": "vcenter"}
         ),
-        "meta": workbook.add_format({"font_name": "Aptos", "font_size": 11, "text_wrap": True}),
+        "meta": workbook.add_format({"font_name": REVIEW_TABLE_FONT, "font_size": 11, "text_wrap": True}),
         "header": workbook.add_format(
             {**border, "bold": True, "align": "center", "text_wrap": True, "bg_color": "#E5E7EB"}
         ),
