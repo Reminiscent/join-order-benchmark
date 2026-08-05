@@ -1,0 +1,76 @@
+{
+  "edges": [
+    {
+      "id": "e_0000_0002",
+      "key_overlap_fraction": 0.02623082951937449,
+      "left": 0,
+      "left_key_ndv": 928,
+      "right": 2,
+      "right_key_ndv": 1491,
+      "selectivity": 1.7592776337608644e-05,
+      "type": "one_to_many"
+    },
+    {
+      "id": "e_0001_0003",
+      "key_overlap_fraction": 0.14191146047370914,
+      "left": 1,
+      "left_key_ndv": 3580,
+      "right": 3,
+      "right_key_ndv": 2751,
+      "selectivity": 3.9640072758019316e-05,
+      "type": "many_to_many"
+    },
+    {
+      "id": "e_0001_0004",
+      "key_overlap_fraction": 0.036957705552654166,
+      "left": 1,
+      "left_key_ndv": 13873,
+      "right": 4,
+      "right_key_ndv": 11857,
+      "selectivity": 2.6640024185579303e-06,
+      "type": "one_to_many"
+    },
+    {
+      "id": "e_0002_0004",
+      "key_overlap_fraction": 0.24857375740748397,
+      "left": 2,
+      "left_key_ndv": 1491,
+      "right": 4,
+      "right_key_ndv": 225,
+      "selectivity": 0.00016671613508214888,
+      "type": "one_to_many"
+    }
+  ],
+  "format": "synthetic-join-order-graph",
+  "nodes": [
+    {
+      "base_rows": 631707,
+      "id": 0
+    },
+    {
+      "base_rows": 13873,
+      "id": 1
+    },
+    {
+      "base_rows": 1491,
+      "id": 2
+    },
+    {
+      "base_rows": 748299,
+      "id": 3
+    },
+    {
+      "base_rows": 34829,
+      "id": 4
+    }
+  ],
+  "root_balance": {
+    "edge_scale": 0.24857375740748397,
+    "raw_average_growth": 4.827540978241136
+  },
+  "source_spec": {
+    "cardinality_seed": 1002,
+    "graph_seed": 7,
+    "n": 5
+  }
+}
