@@ -31,6 +31,10 @@ BENCHMARK_GUCS = (
     ("jit", "off"),
     ("enable_mergejoin", "off"),
 )
+# The benchmark-only provider changes add_path()'s standard 1% fuzzy
+# path-cost dominance to exact dominance while formula mode is active.
+# This is provider behavior, not a session GUC.
+FORMULA_PATH_COST_FUZZ_FACTOR = 1.0
 
 METADATA_DDL = """\
 CREATE SCHEMA bench;

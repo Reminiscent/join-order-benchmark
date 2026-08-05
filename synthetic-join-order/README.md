@@ -40,6 +40,16 @@ To review the PostgreSQL integration, continue with:
 These files explain how the model reaches PostgreSQL; they do not redefine the
 workload formula above.
 
+For matrix execution and result interpretation, read:
+
+1. `tools/run_synthetic_join_order_matrix.py` for CLI inputs and provenance;
+2. `run.py` for one case across algorithms;
+3. `matrix.py` for sizes, seeds, lifecycle, and durable outputs;
+4. `report.py` for common-success aggregation and `report.md`.
+
+The matrix code is only necessary when reviewing measurement policy. It is not
+needed to understand how one graph or one subset cardinality is defined.
+
 ## What the workload models
 
 The workload follows the broad scalability-test method used by Neumann and
