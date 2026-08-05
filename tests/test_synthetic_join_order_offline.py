@@ -41,6 +41,7 @@ from synthetic_join_order.cardinality import (
     subset_cardinality,
     subset_log_cardinality,
 )
+from synthetic_join_order.qualify import QualificationError, qualify_graph
 
 
 GOLDEN_SPEC = ROOT / "synthetic-join-order" / "specs" / "golden_n5.json"
@@ -206,6 +207,25 @@ class SyntheticJoinOrderOfflineTests(unittest.TestCase):
         self.assertIn("bench.join_order_relation", metadata)
         self.assertIn("bench.join_order_edge", metadata)
         self.assertNotIn("key_overlap_fraction", metadata)
+
+    def test_offline_qualification_covers_compiler_and_oracle(self) -> None:
+        graph = generate_graph(
+            GenerationSpec(n=5, graph_seed=7, cardinality_seed=1003)
+        )
+
+        report = qualify_graph(graph, compile_graph(graph))
+
+        self.assertEqual(report.node_count, 5)
+        self.assertGreater(report.connected_subset_count, 0)
+        self.assertGreater(report.recurrence_check_count, 0)
+
+    def test_exhaustive_qualification_stays_small(self) -> None:
+        graph = generate_graph(
+            GenerationSpec(n=11, graph_seed=0, cardinality_seed=1000)
+        )
+
+        with self.assertRaises(QualificationError):
+            qualify_graph(graph)
 
     def test_golden_case_recompiles_exactly_and_detects_drift(self) -> None:
         spec = GenerationSpec.from_dict(json.loads(GOLDEN_SPEC.read_text()))

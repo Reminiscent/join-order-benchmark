@@ -1,9 +1,9 @@
-# Synthetic join-order workload model
+# Synthetic join-order plan-only benchmark
 
-This directory defines the deterministic workload model used by the plan-only
-synthetic join-order benchmark. A minimal spec expands into a logical Join
-graph, construction-independent subset cardinalities, and the schema, query,
-statistics, and metadata consumed during PostgreSQL planning.
+This directory defines deterministic synthetic workloads for comparing
+join-order search inside PostgreSQL. Each generated case is qualified and
+planned with `EXPLAIN`; queries are never executed. The matrix runner repeats
+the same case protocol across relation counts, seeds, and algorithm variants.
 
 ## How to read this workload
 
@@ -29,6 +29,16 @@ boundary. For graph and cardinality generation, follow:
 
 `validate_graph()` and the offline tests enforce the same contract; they are
 useful for implementation review, but are not additional workload semantics.
+
+To review the PostgreSQL integration, continue with:
+
+1. [`patches/README.md`](../patches/README.md) for the formula provider boundary;
+2. `tools/qualify_synthetic_join_order_pg.py` for one-case lifecycle;
+3. `plan.py` for installation and `EXPLAIN` evidence collection;
+4. `qualify.py` for the fail-closed checks applied to that evidence.
+
+These files explain how the model reaches PostgreSQL; they do not redefine the
+workload formula above.
 
 ## What the workload models
 
