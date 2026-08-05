@@ -1,0 +1,1912 @@
+From 59ec53498bba719cda2b211b0594fd1639273c8b Mon Sep 17 00:00:00 2001
+From: Reminiscent <y870414423@gmail.com>
+Date: Mon, 3 Aug 2026 16:42:07 +0800
+Subject: [PATCH NOT FOR COMMIT] Add exact-cardinality support for join-order
+ benchmarks
+
+This patch provides benchmark-only support for controlled join-order experiments.
+
+It is not proposed for inclusion in PostgreSQL.
+
+Apply it after the community join-order patch series being evaluated.
+
+The benchmark disables Merge Join because exactcard does not model rows
+before post-merge filters.
+
+Formula mode also uses exact path-cost dominance instead of PostgreSQL's
+normal 1% fuzz.  With the benchmark's large intermediate cardinalities, that
+fuzz can discard paths whose cost differences are precisely the signal being
+compared and can let a heuristic plan below the resulting DP anchor.  This
+change is confined to formula mode; off mode retains the standard behavior.
+
+The expected application base is the evaluated join-order series head
+8293bde3fe3bdb6a6e2522413432d7209e2aa84d (Add a GUC
+goo_greedy_strategy to choose GOO greedy strategies).  This is not maintained
+as a compatibility patch for other revisions or patch series; resolve conflicts
+manually when applying it elsewhere.
+
+The main data flow is:
+
+  generated relation/edge metadata
+    -> inject base rows and pages
+    -> derive every joinrel row count from its complete relation subset
+    -> give Hash Join the corresponding output tuple count
+    -> expose structured audit evidence to the benchmark
+
+For review, start with the file header of exactcard.c, then inspect
+exactcard_set_baserel_size(), exactcard_set_joinrel_rows(), and
+exactcard_get_hashjoin_rows().  exactcard_last_audit() is the qualification
+interface.  The regression SQL covers the externally visible contract; the
+remaining catalog, GUC, and build-file changes are integration wiring.
+---
+ src/backend/optimizer/path/costsize.c     |   23 +-
+ src/backend/optimizer/util/Makefile       |    1 +
+ src/backend/optimizer/util/exactcard.c    | 1051 +++++++++++++++++++++++++++++
+ src/backend/optimizer/util/meson.build    |    1 +
+ src/backend/optimizer/util/pathnode.c     |    6 +-
+ src/backend/utils/misc/guc_parameters.dat |   25 +
+ src/backend/utils/misc/guc_tables.c       |   14 +
+ src/include/catalog/catversion.h          |    2 +-
+ src/include/catalog/pg_proc.dat           |    5 +
+ src/include/optimizer/exactcard.h         |   50 ++
+ src/test/regress/expected/exactcard.out   |  265 ++++++++
+ src/test/regress/parallel_schedule        |    1 +
+ src/test/regress/sql/exactcard.sql        |  209 ++++++
+ src/tools/pgindent/typedefs.list          |   10 +
+ 14 files changed, 1658 insertions(+), 5 deletions(-)
+
+diff --git a/src/backend/optimizer/path/costsize.c b/src/backend/optimizer/path/costsize.c
+index ac523ecf9a8..7f75eeaa53f 100644
+--- a/src/backend/optimizer/path/costsize.c
++++ b/src/backend/optimizer/path/costsize.c
+@@ -98,6 +98,7 @@
+ #include "nodes/tidbitmap.h"
+ #include "optimizer/clauses.h"
+ #include "optimizer/cost.h"
++#include "optimizer/exactcard.h"
+ #include "optimizer/optimizer.h"
+ #include "optimizer/pathnode.h"
+ #include "optimizer/paths.h"
+@@ -4457,6 +4458,7 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
+ 	double		virtualbuckets;
+ 	Selectivity innerbucketsize;
+ 	Selectivity innermcvfreq;
++	bool		bucket_stats_computed = false;
+ 	ListCell   *hcl;
+ 
+ 	/* Set the number of disabled nodes. */
+@@ -4538,6 +4540,7 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
+ 				if (thisbucketsize < 0)
+ 				{
+ 					/* not cached yet */
++					bucket_stats_computed = true;
+ 					estimate_hash_bucket_stats(root,
+ 											   get_rightop(restrictinfo->clause),
+ 											   virtualbuckets,
+@@ -4556,6 +4559,7 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
+ 				if (thisbucketsize < 0)
+ 				{
+ 					/* not cached yet */
++					bucket_stats_computed = true;
+ 					estimate_hash_bucket_stats(root,
+ 											   get_leftop(restrictinfo->clause),
+ 											   virtualbuckets,
+@@ -4597,9 +4601,17 @@ final_cost_hashjoin(PlannerInfo *root, HashPath *path,
+ 
+ 	/* CPU costs */
+ 
+-	if (path->jpath.jointype == JOIN_SEMI ||
+-		path->jpath.jointype == JOIN_ANTI ||
+-		extra->inner_unique)
++	if (exactcard_mode == EXACTCARD_FORMULA)
++	{
++		hashjointuples = exactcard_get_hashjoin_rows(root, path,
++													 innerbucketsize,
++													 innermcvfreq,
++													 numbuckets, numbatches,
++													 bucket_stats_computed);
++	}
++	else if (path->jpath.jointype == JOIN_SEMI ||
++			 path->jpath.jointype == JOIN_ANTI ||
++			 extra->inner_unique)
+ 	{
+ 		double		outer_matched_rows;
+ 		Selectivity inner_scan_frac;
+@@ -5528,6 +5540,8 @@ set_baserel_size_estimates(PlannerInfo *root, RelOptInfo *rel)
+ 							   NULL);
+ 
+ 	rel->rows = clamp_row_est(nrows);
++	if (exactcard_mode == EXACTCARD_FORMULA && rel->rtekind == RTE_RELATION)
++		exactcard_set_baserel_size(root, rel);
+ 
+ 	cost_qual_eval(&rel->baserestrictcost, rel->baserestrictinfo, root);
+ 
+@@ -5606,6 +5620,9 @@ set_joinrel_size_estimates(PlannerInfo *root, RelOptInfo *rel,
+ 										   inner_rel->rows,
+ 										   sjinfo,
+ 										   restrictlist);
++	if (exactcard_mode == EXACTCARD_FORMULA)
++		rel->rows = exactcard_set_joinrel_rows(root, rel, outer_rel, inner_rel,
++											   sjinfo, restrictlist, rel->rows);
+ }
+ 
+ /*
+diff --git a/src/backend/optimizer/util/Makefile b/src/backend/optimizer/util/Makefile
+index 87b4c3c0869..8beb92da374 100644
+--- a/src/backend/optimizer/util/Makefile
++++ b/src/backend/optimizer/util/Makefile
+@@ -15,6 +15,7 @@ include $(top_builddir)/src/Makefile.global
+ OBJS = \
+ 	appendinfo.o \
+ 	clauses.o \
++	exactcard.o \
+ 	extendplan.o \
+ 	inherit.o \
+ 	joininfo.o \
+diff --git a/src/backend/optimizer/util/exactcard.c b/src/backend/optimizer/util/exactcard.c
+new file mode 100644
+index 00000000000..491fc3a5a39
+--- /dev/null
++++ b/src/backend/optimizer/util/exactcard.c
+@@ -0,0 +1,1051 @@
++/*-------------------------------------------------------------------------
++ *
++ * exactcard.c
++ *	  Formula cardinality provider for join-order benchmarks.
++ *
++ * This is a benchmark-only facility.  When exactcard.mode = formula, the
++ * optimizer stops deriving join-relation row counts from clause statistics
++ * and instead uses a closed-form product oracle loaded from two metadata
++ * tables, bench.join_order_relation and bench.join_order_edge, keyed by the
++ * exactcard.instance_id GUC.
++ *
++ * The instance describes an independent (product-form) query graph: each
++ * base relation has a cardinality |r| (base_rows), and each join edge has an
++ * explicit logical selectivity s.  Its key NDV D separately describes
++ * the native equality statistics used by Hash Join costing.  Under
++ * independence, for any subset S of the relations
++ *
++ *		log |Join(S)| = sum_{r in S} log|r| + sum_{e in E(S)} log s_e
++ *
++ * where E(S) is the set of edges with both endpoints in S.  This is exactly
++ * PostgreSQL's own independence estimate, but computed once from the visible
++ * base numbers rather than accumulated through per-level row estimates.
++ *
++ * Empty benchmark tables also lose restored pg_class rows and pages during
++ * physical-size estimation.  The provider therefore injects generated base
++ * rows and pages before scan paths are built.  For joins, it keeps the
++ * *unclamped* log cardinality in per-RelOptInfo planner state and applies
++ * clamp_row_est only where a value crosses into a consumer: the join
++ * relation's row count and output-sensitive Hash Join tuple counts.
++ * Base scans and join consumers thus read the same generated landscape.
++ * Merge Join is outside this provider because it may need row counts before
++ * remaining join filters are applied.  The benchmark disables it.
++ *
++ * When exactcard.mode = off the injection hooks are never called and planner
++ * behavior is bit-for-bit unchanged.
++ *
++ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
++ * Portions Copyright (c) 1994, Regents of the University of California
++ *
++ * IDENTIFICATION
++ *	  src/backend/optimizer/util/exactcard.c
++ *
++ *-------------------------------------------------------------------------
++ */
++#include "postgres.h"
++
++#include <math.h>
++
++#include "catalog/pg_class_d.h"
++#include "catalog/pg_type.h"
++#include "executor/spi.h"
++#include "lib/stringinfo.h"
++#include "nodes/parsenodes.h"
++#include "optimizer/exactcard.h"
++#include "optimizer/extendplan.h"
++#include "optimizer/optimizer.h"
++#include "utils/builtins.h"
++#include "utils/fmgrprotos.h"
++#include "utils/hsearch.h"
++#include "utils/json.h"
++#include "utils/lsyscache.h"
++#include "utils/memutils.h"
++
++/* GUC variables (wired up in guc_parameters.dat / guc_tables.c) */
++int			exactcard_mode = EXACTCARD_OFF;
++int			exactcard_audit = EXACTCARD_AUDIT_OFF;
++char	   *exactcard_instance_id = NULL;
++
++/* Keep this in step with clamp_row_est() in costsize.c. */
++#define EXACTCARD_MAXIMUM_ROWCOUNT 1.0e100
++
++/*
++ * Backend-local instance metadata.  One instance is cached at a time; it is
++ * reloaded whenever exactcard.instance_id changes.  All of it lives in
++ * exactcard_meta_cxt so it survives across statements until replaced.
++ */
++typedef struct ExactCardEdge
++{
++	int			left;			/* canonical id of one endpoint */
++	int			right;			/* canonical id of the other endpoint */
++	int64		left_key_ndv;	/* ndistinct at the left endpoint */
++	int64		right_key_ndv;	/* ndistinct at the right endpoint */
++	double		selectivity;	/* logical edge selectivity */
++	double		log_sel;		/* log(selectivity) */
++} ExactCardEdge;
++
++typedef struct ExactCardOidEntry
++{
++	Oid			reloid;			/* hash key: table OID */
++	int			canon;			/* canonical relation id */
++} ExactCardOidEntry;
++
++typedef struct ExactCardMeta
++{
++	char	   *instance_id;
++	int			nrels;
++	double	   *base_rows;		/* [nrels], indexed by canonical id */
++	BlockNumber *base_pages;	/* [nrels], indexed by canonical id */
++	Oid		   *reloid;			/* [nrels], indexed by canonical id */
++	int			nedges;
++	ExactCardEdge *edges;		/* [nedges] */
++	HTAB	   *oid_to_canon;	/* Oid -> ExactCardOidEntry */
++} ExactCardMeta;
++
++/*
++ * Per-RelOptInfo state: the unclamped log cardinality of the subset the rel
++ * represents, plus the set of canonical relation ids it covers (used to find
++ * the edges crossing between two sub-relations).  Allocated in the rel's own
++ * memory context, so it shares the rel's lifetime and cannot outlive it.
++ */
++typedef struct ExactCardRelState
++{
++	double		log_card;		/* unclamped log C(S) */
++	Bitmapset  *canon;			/* canonical ids in this subset */
++} ExactCardRelState;
++
++/*
++ * Audit records for exactcard_last_audit().  Populated during planning into
++ * exactcard_audit_cxt and reset once per top-level planning run.  The detail
++ * captured is governed by exactcard.audit at plan time.
++ */
++typedef struct ExactCardBaseRec
++{
++	int			canon;
++	Oid			reloid;
++	double		base_rows;		/* injected metadata cardinality */
++	BlockNumber base_pages;		/* injected metadata page count */
++} ExactCardBaseRec;
++
++typedef struct ExactCardJoinRec
++{
++	Bitmapset  *relations;
++	Bitmapset  *outer;
++	Bitmapset  *inner;
++	List	   *crossing;		/* of ExactCardEdge * (copied) */
++	double		formula_rows;	/* what we injected (clamped) */
++	double		log_card;		/* unclamped */
++} ExactCardJoinRec;
++
++typedef struct ExactCardHashRec
++{
++	Bitmapset  *relations;
++	Bitmapset  *outer;
++	Bitmapset  *inner;
++	int			crossing_count;
++	int			inner_endpoint;
++	int64		key_ndv;
++	double		edge_selectivity;
++	double		outer_rows;
++	double		inner_rows;
++	double		innerbucketsize;
++	double		innermcvfreq;
++	int			numbuckets;
++	int			numbatches;
++	bool		bucket_stats_computed;
++	double		hashjointuples;
++} ExactCardHashRec;
++
++typedef struct ExactCardAudit
++{
++	char	   *instance_id;
++	int			join_count;
++	int			hashjoin_count;
++	double		final_rows;		/* rows of the widest join seen */
++	int			final_relcount;
++	List	   *bases;			/* of ExactCardBaseRec * */
++	List	   *joins;			/* of ExactCardJoinRec * */
++	List	   *hashjoins;		/* of ExactCardHashRec * */
++} ExactCardAudit;
++
++static int	exactcard_ext_id = -1;
++static bool exactcard_in_lookup = false;
++
++static MemoryContext exactcard_meta_cxt = NULL;
++static ExactCardMeta *exactcard_meta = NULL;
++
++static MemoryContext exactcard_audit_cxt = NULL;
++static ExactCardAudit *exactcard_audit_data = NULL;
++
++
++/*
++ * Make sure our planner extension id has been assigned.
++ */
++static inline void
++exactcard_ensure_ext_id(void)
++{
++	if (exactcard_ext_id < 0)
++		exactcard_ext_id = GetPlannerExtensionId("exactcard");
++}
++
++/*
++ * Load one instance's metadata from the benchmark tables via SPI.
++ *
++ * SPI runs queries, which re-enters the planner; exactcard_in_lookup guards
++ * against that re-entry re-triggering formula work.  The loaded scalars are
++ * copied out of the SPI context into exactcard_meta_cxt so they outlive
++ * SPI_finish().
++ */
++static void
++exactcard_load_meta(const char *instance_id)
++{
++	Oid			argtypes[1] = {TEXTOID};
++	Datum		values[1];
++	bool		connected = false;
++
++	values[0] = CStringGetTextDatum(instance_id);
++
++	if (exactcard_meta_cxt == NULL)
++		exactcard_meta_cxt = AllocSetContextCreate(TopMemoryContext,
++												   "exactcard metadata",
++												   ALLOCSET_SMALL_SIZES);
++	else
++		MemoryContextReset(exactcard_meta_cxt);
++	exactcard_meta = NULL;
++
++	exactcard_in_lookup = true;
++	PG_TRY();
++	{
++		ExactCardMeta *meta;
++		MemoryContext oldcxt;
++		HASHCTL		ctl;
++		bool	   *seen;
++		int			nrels;
++		int			nedges;
++		int			previous_left = -1;
++		int			previous_right = -1;
++
++		if (SPI_connect() != SPI_OK_CONNECT)
++			elog(ERROR, "exactcard: SPI_connect failed");
++		connected = true;
++
++		/* --- base relations --- */
++		if (SPI_execute_with_args("SELECT canonical_id, relation, base_rows, base_pages"
++								  " FROM bench.join_order_relation"
++								  " WHERE instance_id = $1"
++								  " ORDER BY canonical_id",
++								  1, argtypes, values, NULL, true, 0)
++			!= SPI_OK_SELECT)
++			elog(ERROR, "exactcard: could not read bench.join_order_relation");
++
++		nrels = (int) SPI_processed;
++		if (nrels == 0)
++			ereport(ERROR,
++					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++					 errmsg("exactcard: no relations found for instance \"%s\"",
++							instance_id)));
++
++		oldcxt = MemoryContextSwitchTo(exactcard_meta_cxt);
++		meta = palloc0(sizeof(ExactCardMeta));
++		meta->instance_id = pstrdup(instance_id);
++		meta->nrels = nrels;
++		meta->base_rows = palloc0(nrels * sizeof(double));
++		meta->base_pages = palloc0(nrels * sizeof(BlockNumber));
++		meta->reloid = palloc0(nrels * sizeof(Oid));
++		MemSet(&ctl, 0, sizeof(ctl));
++		ctl.keysize = sizeof(Oid);
++		ctl.entrysize = sizeof(ExactCardOidEntry);
++		ctl.hcxt = exactcard_meta_cxt;
++		meta->oid_to_canon = hash_create("exactcard oid map", nrels, &ctl,
++										 HASH_ELEM | HASH_BLOBS | HASH_CONTEXT);
++		MemoryContextSwitchTo(oldcxt);
++
++		/*
++		 * Track which canonical ids we have seen.  With nrels rows all in [0,
++		 * nrels), rejecting duplicates guarantees a gap-free 0..nrels-1
++		 * mapping, so no base_rows slot is left at its palloc0 zero.
++		 */
++		seen = palloc0(nrels * sizeof(bool));
++
++		for (uint64 i = 0; i < SPI_processed; i++)
++		{
++			HeapTuple	tuple = SPI_tuptable->vals[i];
++			TupleDesc	tupdesc = SPI_tuptable->tupdesc;
++			bool		isnull;
++			int			canon;
++			Oid			reloid;
++			double		base_rows;
++			int64		base_pages;
++			ExactCardOidEntry *oidentry;
++			bool		found;
++
++			canon = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null canonical_id");
++			reloid = DatumGetObjectId(SPI_getbinval(tuple, tupdesc, 2, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null relation");
++			base_rows = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 3, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null base_rows");
++			base_pages = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null base_pages");
++
++			if (canon < 0 || canon >= nrels)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: canonical_id %d out of range for instance \"%s\"",
++								canon, instance_id)));
++			if (seen[canon])
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: duplicate canonical_id %d for instance \"%s\"",
++								canon, instance_id)));
++			seen[canon] = true;
++			if (!isfinite(base_rows) || base_rows <= 0.0)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: base_rows must be finite and greater than zero")));
++			if (base_pages < 1 || base_pages > MaxBlockNumber)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: base_pages out of range for instance \"%s\"",
++								instance_id)));
++
++			meta->base_rows[canon] = base_rows;
++			meta->base_pages[canon] = (BlockNumber) base_pages;
++			meta->reloid[canon] = reloid;
++			oidentry = hash_search(meta->oid_to_canon, &reloid,
++								   HASH_ENTER, &found);
++			if (found)
++			{
++				char	   *relname = get_rel_name(reloid);
++
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: relation \"%s\" has multiple canonical ids for instance \"%s\"",
++								relname ? relname : "?", instance_id)));
++			}
++			oidentry->canon = canon;
++		}
++
++		/* --- edges --- */
++		if (SPI_execute_with_args("SELECT left_id, right_id,"
++								  " left_key_ndv, right_key_ndv, selectivity"
++								  " FROM bench.join_order_edge"
++								  " WHERE instance_id = $1"
++								  " ORDER BY left_id, right_id",
++								  1, argtypes, values, NULL, true, 0)
++			!= SPI_OK_SELECT)
++			elog(ERROR, "exactcard: could not read bench.join_order_edge");
++
++		nedges = (int) SPI_processed;
++		oldcxt = MemoryContextSwitchTo(exactcard_meta_cxt);
++		meta->nedges = nedges;
++		meta->edges = palloc0(Max(nedges, 1) * sizeof(ExactCardEdge));
++		MemoryContextSwitchTo(oldcxt);
++
++		for (uint64 i = 0; i < SPI_processed; i++)
++		{
++			HeapTuple	tuple = SPI_tuptable->vals[i];
++			TupleDesc	tupdesc = SPI_tuptable->tupdesc;
++			bool		isnull;
++			int			left;
++			int			right;
++			int64		left_key_ndv;
++			int64		right_key_ndv;
++			double		selectivity;
++
++			left = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 1, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null left_id");
++			right = DatumGetInt32(SPI_getbinval(tuple, tupdesc, 2, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null right_id");
++			left_key_ndv = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 3, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null left_key_ndv");
++			right_key_ndv = DatumGetInt64(SPI_getbinval(tuple, tupdesc, 4, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null right_key_ndv");
++			selectivity = DatumGetFloat8(SPI_getbinval(tuple, tupdesc, 5, &isnull));
++			if (isnull)
++				elog(ERROR, "exactcard: null selectivity");
++
++			if (left < 0 || left >= nrels || right < 0 || right >= nrels)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: edge endpoint out of range for instance \"%s\"",
++								instance_id)));
++			if (left >= right)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: edge endpoints must satisfy left_id < right_id")));
++			if (left == previous_left && right == previous_right)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: duplicate edge (%d, %d) for instance \"%s\"",
++								left, right, instance_id)));
++			if (left_key_ndv < 1 || right_key_ndv < 1)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: endpoint key NDVs must be >= 1")));
++			if (!isfinite(selectivity) || selectivity <= 0.0 || selectivity > 1.0)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("exactcard: edge selectivity must be finite and in (0, 1]")));
++
++			previous_left = left;
++			previous_right = right;
++			meta->edges[i].left = left;
++			meta->edges[i].right = right;
++			meta->edges[i].left_key_ndv = left_key_ndv;
++			meta->edges[i].right_key_ndv = right_key_ndv;
++			meta->edges[i].selectivity = selectivity;
++			meta->edges[i].log_sel = log(selectivity);
++		}
++
++		SPI_finish();
++		connected = false;
++		exactcard_in_lookup = false;
++
++		exactcard_meta = meta;
++	}
++	PG_CATCH();
++	{
++		if (connected)
++			SPI_finish();
++		exactcard_in_lookup = false;
++		PG_RE_THROW();
++	}
++	PG_END_TRY();
++}
++
++/*
++ * Return the metadata for the currently selected instance, loading or
++ * reloading it as needed.  Fails closed if no instance is selected.
++ */
++static ExactCardMeta *
++exactcard_ensure_meta(void)
++{
++	const char *instance_id = exactcard_instance_id ? exactcard_instance_id : "";
++
++	if (instance_id[0] == '\0')
++		ereport(ERROR,
++				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++				 errmsg("exactcard: exactcard.instance_id must be set when exactcard.mode is formula")));
++
++	if (exactcard_meta == NULL ||
++		strcmp(exactcard_meta->instance_id, instance_id) != 0)
++		exactcard_load_meta(instance_id);
++
++	return exactcard_meta;
++}
++
++/*
++ * Map a range-table index to a canonical relation id, failing closed if the
++ * rel is not a plain table belonging to the instance.
++ */
++static int
++exactcard_canon_of_relid(PlannerInfo *root, ExactCardMeta *meta, int relid)
++{
++	RangeTblEntry *rte = root->simple_rte_array[relid];
++	ExactCardOidEntry *oidentry;
++	bool		found;
++
++	if (rte == NULL || rte->rtekind != RTE_RELATION || !OidIsValid(rte->relid))
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: range-table entry %d is not a plain table",
++						relid)));
++
++	oidentry = hash_search(meta->oid_to_canon, &rte->relid, HASH_FIND, &found);
++	if (!found)
++	{
++		char	   *relname = get_rel_name(rte->relid);
++
++		ereport(ERROR,
++				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++				 errmsg("exactcard: relation \"%s\" is not part of instance \"%s\"",
++						relname ? relname : "?", meta->instance_id)));
++	}
++	return oidentry->canon;
++}
++
++/*
++ * Compute a rel's unclamped log cardinality directly from base metadata over
++ * its relids, and cache it in the rel.  Works for base rels (a single member,
++ * no internal edges) and, as a fallback, for any join rel.
++ */
++static ExactCardRelState *
++exactcard_compute_relstate(PlannerInfo *root, ExactCardMeta *meta,
++						   RelOptInfo *rel)
++{
++	MemoryContext relcxt = GetMemoryChunkContext(rel);
++	MemoryContext oldcxt = MemoryContextSwitchTo(relcxt);
++	ExactCardRelState *st = palloc0(sizeof(ExactCardRelState));
++	Bitmapset  *canon = NULL;
++	double		log_card = 0.0;
++	int			relid = -1;
++	int			c = -1;
++
++	while ((relid = bms_next_member(rel->relids, relid)) >= 0)
++		canon = bms_add_member(canon, exactcard_canon_of_relid(root, meta, relid));
++	st->canon = canon;
++	MemoryContextSwitchTo(oldcxt);
++
++	while ((c = bms_next_member(canon, c)) >= 0)
++		log_card += log(meta->base_rows[c]);
++	for (int i = 0; i < meta->nedges; i++)
++	{
++		if (bms_is_member(meta->edges[i].left, canon) &&
++			bms_is_member(meta->edges[i].right, canon))
++			log_card += meta->edges[i].log_sel;
++	}
++	st->log_card = log_card;
++
++	SetRelOptInfoExtensionState(rel, exactcard_ext_id, st);
++	return st;
++}
++
++/*
++ * Record one base relation into the audit buffer (summary detail or above).
++ */
++static void
++exactcard_audit_base(ExactCardMeta *meta, int canon)
++{
++	MemoryContext oldcxt;
++	ExactCardBaseRec *rec;
++
++	if (exactcard_audit_data == NULL || exactcard_audit < EXACTCARD_AUDIT_SUMMARY)
++		return;
++
++	oldcxt = MemoryContextSwitchTo(exactcard_audit_cxt);
++	rec = palloc0(sizeof(ExactCardBaseRec));
++	rec->canon = canon;
++	rec->reloid = meta->reloid[canon];
++	rec->base_rows = meta->base_rows[canon];
++	rec->base_pages = meta->base_pages[canon];
++	exactcard_audit_data->bases = lappend(exactcard_audit_data->bases, rec);
++	MemoryContextSwitchTo(oldcxt);
++}
++
++/*
++ * Fetch (or lazily compute) a rel's formula state.
++ */
++static ExactCardRelState *
++exactcard_rel_state(PlannerInfo *root, ExactCardMeta *meta, RelOptInfo *rel)
++{
++	ExactCardRelState *st;
++
++	st = GetRelOptInfoExtensionState(rel, exactcard_ext_id);
++	if (st != NULL)
++		return st;
++
++	st = exactcard_compute_relstate(root, meta, rel);
++
++	return st;
++}
++
++/*
++ * Clamp an unclamped log cardinality without overflowing exp().
++ */
++static double
++exactcard_clamp_log_rows(double log_card)
++{
++	Assert(isfinite(log_card));
++
++	if (log_card <= 0.0)
++		return 1.0;
++	if (log_card >= log(EXACTCARD_MAXIMUM_ROWCOUNT))
++		return EXACTCARD_MAXIMUM_ROWCOUNT;
++	return clamp_row_est(exp(log_card));
++}
++
++/*
++ * Reset the audit buffer at the start of each top-level planning run.  The
++ * PlannerGlobal is unique per top-level plan and shared across query levels,
++ * so we use a marker in its extension state to fire this exactly once.
++ */
++static void
++exactcard_audit_begin(PlannerInfo *root)
++{
++	PlannerGlobal *glob = root->glob;
++	MemoryContext oldcxt;
++
++	if (GetPlannerGlobalExtensionState(glob, exactcard_ext_id) != NULL)
++		return;
++
++	if (exactcard_audit_cxt == NULL)
++		exactcard_audit_cxt = AllocSetContextCreate(TopMemoryContext,
++													"exactcard audit",
++													ALLOCSET_SMALL_SIZES);
++	else
++		MemoryContextReset(exactcard_audit_cxt);
++
++	oldcxt = MemoryContextSwitchTo(exactcard_audit_cxt);
++	exactcard_audit_data = palloc0(sizeof(ExactCardAudit));
++	exactcard_audit_data->instance_id =
++		pstrdup(exactcard_meta ? exactcard_meta->instance_id : "");
++	exactcard_audit_data->final_relcount = -1;
++	MemoryContextSwitchTo(oldcxt);
++
++	/* Mark this run; the marker lives with the PlannerGlobal. */
++	SetPlannerGlobalExtensionState(glob, exactcard_ext_id,
++								   MemoryContextAlloc(GetMemoryChunkContext(glob), 1));
++}
++
++/*
++ * Replace the empty table's native base-size estimate with instance metadata.
++ *
++ * This runs after estimate_rel_size() and set_baserel_size_estimates() have
++ * produced PostgreSQL's native values, but before any base paths are built.
++ * Empty benchmark tables otherwise have zero pages and clamp to one row even
++ * when pg_class statistics were restored.  Both rows and pages must therefore
++ * come from the same generated metadata that feeds the subset oracle.
++ */
++void
++exactcard_set_baserel_size(PlannerInfo *root, RelOptInfo *rel)
++{
++	RangeTblEntry *rte;
++	ExactCardMeta *meta;
++	int			canon;
++
++	/* Metadata SPI queries re-enter base-size estimation. */
++	if (exactcard_in_lookup)
++		return;
++
++	exactcard_ensure_ext_id();
++
++	if (rel->reloptkind != RELOPT_BASEREL || rel->rtekind != RTE_RELATION)
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: only plain base relations are supported")));
++	rte = root->simple_rte_array[rel->relid];
++	if (rte == NULL || rte->relkind != RELKIND_RELATION ||
++		rte->tablesample != NULL || rel->baserestrictinfo != NIL)
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: sampled, filtered, or non-table base relations are not supported")));
++
++	meta = exactcard_ensure_meta();
++	exactcard_audit_begin(root);
++	canon = exactcard_canon_of_relid(root, meta, rel->relid);
++
++	rel->tuples = meta->base_rows[canon];
++	rel->rows = clamp_row_est(meta->base_rows[canon]);
++	rel->pages = meta->base_pages[canon];
++
++	/* Seed unclamped formula state before join relations consume this rel. */
++	(void) exactcard_compute_relstate(root, meta, rel);
++	exactcard_audit_base(meta, canon);
++}
++
++/*
++ * Inject the formula row count for a join relation.
++ *
++ * Called from set_joinrel_size_estimates after PostgreSQL's native estimate.
++ * Compute directly from the joinrel's canonical subset so floating-point
++ * summation order does not depend on the input split that first constructs
++ * the joinrel.
++ */
++double
++exactcard_set_joinrel_rows(PlannerInfo *root, RelOptInfo *joinrel,
++						   RelOptInfo *outer_rel, RelOptInfo *inner_rel,
++						   SpecialJoinInfo *sjinfo, List *restrictlist,
++						   double native_rows)
++{
++	ExactCardMeta *meta;
++	ExactCardRelState *ostate;
++	ExactCardRelState *istate;
++	ExactCardRelState *jstate;
++	MemoryContext oldcxt;
++	double		formula_rows;
++	List	   *crossing = NIL;
++	int			relcount;
++
++	/* Inert while loading metadata (never reached in practice). */
++	if (exactcard_in_lookup)
++		return native_rows;
++
++	exactcard_ensure_ext_id();
++
++	/* Fail closed on anything outside the benchmark inner-join contract. */
++	if (sjinfo == NULL || sjinfo->jointype != JOIN_INNER)
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: only inner joins are supported")));
++
++	meta = exactcard_ensure_meta();
++	exactcard_audit_begin(root);
++
++	ostate = exactcard_rel_state(root, meta, outer_rel);
++	istate = exactcard_rel_state(root, meta, inner_rel);
++
++	jstate = exactcard_compute_relstate(root, meta, joinrel);
++	for (int i = 0; i < meta->nedges; i++)
++	{
++		ExactCardEdge *e = &meta->edges[i];
++		bool		l_out = bms_is_member(e->left, ostate->canon);
++		bool		r_out = bms_is_member(e->right, ostate->canon);
++		bool		l_in = bms_is_member(e->left, istate->canon);
++		bool		r_in = bms_is_member(e->right, istate->canon);
++
++		if ((l_out && r_in) || (l_in && r_out))
++		{
++			if (exactcard_audit_data && exactcard_audit >= EXACTCARD_AUDIT_TRACE)
++			{
++				ExactCardEdge *ecopy;
++
++				oldcxt = MemoryContextSwitchTo(exactcard_audit_cxt);
++				ecopy = palloc(sizeof(ExactCardEdge));
++				*ecopy = *e;
++				crossing = lappend(crossing, ecopy);
++				MemoryContextSwitchTo(oldcxt);
++			}
++		}
++	}
++
++	formula_rows = exactcard_clamp_log_rows(jstate->log_card);
++
++	/* Audit. */
++	if (exactcard_audit_data)
++	{
++		exactcard_audit_data->join_count++;
++		relcount = bms_num_members(joinrel->relids);
++		if (relcount > exactcard_audit_data->final_relcount)
++		{
++			exactcard_audit_data->final_relcount = relcount;
++			exactcard_audit_data->final_rows = formula_rows;
++		}
++		if (exactcard_audit >= EXACTCARD_AUDIT_TRACE)
++		{
++			ExactCardJoinRec *rec;
++
++			oldcxt = MemoryContextSwitchTo(exactcard_audit_cxt);
++			rec = palloc0(sizeof(ExactCardJoinRec));
++			rec->relations = bms_copy(jstate->canon);
++			rec->outer = bms_copy(ostate->canon);
++			rec->inner = bms_copy(istate->canon);
++			rec->crossing = crossing;
++			rec->formula_rows = formula_rows;
++			rec->log_card = jstate->log_card;
++			exactcard_audit_data->joins = lappend(exactcard_audit_data->joins, rec);
++			MemoryContextSwitchTo(oldcxt);
++		}
++	}
++
++	return formula_rows;
++}
++
++/*
++ * Supply the Hash Join tuple count from the same subset oracle.
++ *
++ * The join relation was already sized (and cached) by
++ * exactcard_set_joinrel_rows before any path is costed, so hashjointuples,
++ * joinrel->rows, and the hash path's row count read one value; bucket/MCV
++ * inputs remain audit evidence.  The compiler emits one edge-specific
++ * predicate per graph edge, so equal clause and crossing counts prove coverage.
++ */
++double
++exactcard_get_hashjoin_rows(PlannerInfo *root, HashPath *path,
++							double innerbucketsize, double innermcvfreq,
++							int numbuckets, int numbatches,
++							bool bucket_stats_computed)
++{
++	ExactCardMeta *meta;
++	RelOptInfo *joinrel = path->jpath.path.parent;
++	RelOptInfo *outerrel = path->jpath.outerjoinpath->parent;
++	RelOptInfo *innerrel = path->jpath.innerjoinpath->parent;
++	ExactCardRelState *st;
++	ExactCardRelState *outerstate;
++	ExactCardRelState *innerstate;
++	ExactCardEdge *crossing = NULL;
++	int			crossing_count = 0;
++	double		hashjointuples;
++
++	Assert(!exactcard_in_lookup);
++
++	exactcard_ensure_ext_id();
++
++	/* Fail closed on path kinds whose rows would not match the oracle. */
++	if (path->jpath.jointype != JOIN_INNER)
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: only inner hash joins are supported")));
++	if (path->jpath.path.param_info != NULL)
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: parameterized hash joins are not supported")));
++	if (path->jpath.path.parallel_workers > 0)
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: parallel hash joins are not supported")));
++
++	meta = exactcard_ensure_meta();
++	exactcard_audit_begin(root);
++
++	st = exactcard_rel_state(root, meta, joinrel);
++	outerstate = exactcard_rel_state(root, meta, outerrel);
++	innerstate = exactcard_rel_state(root, meta, innerrel);
++	for (int i = 0; i < meta->nedges; i++)
++	{
++		ExactCardEdge *edge = &meta->edges[i];
++		bool		left_outer = bms_is_member(edge->left, outerstate->canon);
++		bool		right_outer = bms_is_member(edge->right, outerstate->canon);
++		bool		left_inner = bms_is_member(edge->left, innerstate->canon);
++		bool		right_inner = bms_is_member(edge->right, innerstate->canon);
++
++		if ((left_outer && right_inner) || (right_outer && left_inner))
++		{
++			crossing_count++;
++			if (crossing == NULL)
++				crossing = edge;
++		}
++	}
++	if (crossing == NULL)
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: Hash Join inputs must have a crossing edge")));
++	if (list_length(path->path_hashclauses) != crossing_count)
++		ereport(ERROR,
++				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
++				 errmsg("exactcard: every crossing edge must be a Hash Join clause")));
++	hashjointuples = exactcard_clamp_log_rows(st->log_card);
++
++	if (exactcard_audit_data)
++	{
++		exactcard_audit_data->hashjoin_count++;
++		if (exactcard_audit >= EXACTCARD_AUDIT_TRACE)
++		{
++			MemoryContext oldcxt = MemoryContextSwitchTo(exactcard_audit_cxt);
++			ExactCardHashRec *rec = palloc0(sizeof(ExactCardHashRec));
++
++			rec->relations = bms_copy(st->canon);
++			rec->outer = bms_copy(outerstate->canon);
++			rec->inner = bms_copy(innerstate->canon);
++			rec->crossing_count = crossing_count;
++			if (crossing_count == 1)
++			{
++				rec->inner_endpoint =
++					bms_is_member(crossing->left, innerstate->canon) ?
++					crossing->left : crossing->right;
++				rec->key_ndv =
++					rec->inner_endpoint == crossing->left ?
++					crossing->left_key_ndv : crossing->right_key_ndv;
++				rec->edge_selectivity = crossing->selectivity;
++			}
++			rec->outer_rows = path->jpath.outerjoinpath->rows;
++			rec->inner_rows = path->jpath.innerjoinpath->rows;
++			rec->innerbucketsize = innerbucketsize;
++			rec->innermcvfreq = innermcvfreq;
++			rec->numbuckets = numbuckets;
++			rec->numbatches = numbatches;
++			rec->bucket_stats_computed = bucket_stats_computed;
++			rec->hashjointuples = hashjointuples;
++			exactcard_audit_data->hashjoins =
++				lappend(exactcard_audit_data->hashjoins, rec);
++			MemoryContextSwitchTo(oldcxt);
++		}
++	}
++
++	return hashjointuples;
++}
++
++/* ---- audit reporting ---- */
++
++/* Emit a finite integer-valued double, or null. */
++static void
++exactcard_json_rows(StringInfo buf, double v)
++{
++	if (isfinite(v))
++		appendStringInfo(buf, "%.0f", v);
++	else
++		appendStringInfoString(buf, "null");
++}
++
++/* Emit a finite double, or null. */
++static void
++exactcard_json_double(StringInfo buf, double v)
++{
++	if (isfinite(v))
++		appendStringInfo(buf, "%.17g", v);
++	else
++		appendStringInfoString(buf, "null");
++}
++
++/* Emit a bitmap of canonical ids as a JSON array, ascending. */
++static void
++exactcard_json_canon(StringInfo buf, Bitmapset *bms)
++{
++	int			m = -1;
++	bool		first = true;
++
++	appendStringInfoChar(buf, '[');
++	while ((m = bms_next_member(bms, m)) >= 0)
++	{
++		if (!first)
++			appendStringInfoChar(buf, ',');
++		appendStringInfo(buf, "%d", m);
++		first = false;
++	}
++	appendStringInfoChar(buf, ']');
++}
++
++/*
++ * exactcard_last_audit() -> jsonb
++ *
++ * Return a structured record of the most recent formula-mode plan, for the
++ * benchmark's estimate-vs-analytic qualification gate.  Detail reflects the
++ * exactcard.audit level that was in effect while that plan was built.
++ */
++Datum
++exactcard_last_audit(PG_FUNCTION_ARGS)
++{
++	StringInfoData buf;
++	ExactCardAudit *a = exactcard_audit_data;
++	Datum		result;
++
++	initStringInfo(&buf);
++
++	if (a == NULL)
++	{
++		appendStringInfoString(&buf, "{\"active\": false}");
++	}
++	else
++	{
++		ListCell   *lc;
++
++		appendStringInfoString(&buf, "{\"active\": true, \"instance_id\": ");
++		escape_json(&buf, a->instance_id);
++		appendStringInfo(&buf, ", \"join_count\": %d", a->join_count);
++		appendStringInfo(&buf, ", \"hashjoin_count\": %d", a->hashjoin_count);
++		appendStringInfoString(&buf, ", \"final_rows\": ");
++		exactcard_json_rows(&buf, a->final_rows);
++
++		if (a->bases != NIL)
++		{
++			bool		first = true;
++
++			appendStringInfoString(&buf, ", \"base\": [");
++			foreach(lc, a->bases)
++			{
++				ExactCardBaseRec *rec = lfirst(lc);
++				char	   *relname = get_rel_name(rec->reloid);
++
++				if (!first)
++					appendStringInfoChar(&buf, ',');
++				appendStringInfo(&buf, "{\"canonical_id\": %d, \"relation\": ",
++								 rec->canon);
++				escape_json(&buf, relname ? relname : "?");
++				appendStringInfoString(&buf, ", \"base_rows\": ");
++				exactcard_json_rows(&buf, rec->base_rows);
++				appendStringInfo(&buf, ", \"base_pages\": %u", rec->base_pages);
++				appendStringInfoChar(&buf, '}');
++				first = false;
++			}
++			appendStringInfoChar(&buf, ']');
++		}
++
++		if (a->joins != NIL)
++		{
++			bool		first = true;
++
++			appendStringInfoString(&buf, ", \"joins\": [");
++			foreach(lc, a->joins)
++			{
++				ExactCardJoinRec *rec = lfirst(lc);
++				ListCell   *lc2;
++				bool		xfirst = true;
++
++				if (!first)
++					appendStringInfoChar(&buf, ',');
++				appendStringInfoString(&buf, "{\"relations\": ");
++				exactcard_json_canon(&buf, rec->relations);
++				appendStringInfoString(&buf, ", \"outer\": ");
++				exactcard_json_canon(&buf, rec->outer);
++				appendStringInfoString(&buf, ", \"inner\": ");
++				exactcard_json_canon(&buf, rec->inner);
++				appendStringInfoString(&buf, ", \"crossing\": [");
++				foreach(lc2, rec->crossing)
++				{
++					ExactCardEdge *e = lfirst(lc2);
++
++					if (!xfirst)
++						appendStringInfoChar(&buf, ',');
++					appendStringInfo(&buf,
++									 "{\"left\": %d, \"right\": %d,"
++									 " \"left_key_ndv\": " INT64_FORMAT
++									 ", \"right_key_ndv\": " INT64_FORMAT,
++									 e->left, e->right,
++									 e->left_key_ndv, e->right_key_ndv);
++					appendStringInfoString(&buf, ", \"selectivity\": ");
++					exactcard_json_double(&buf, e->selectivity);
++					appendStringInfoChar(&buf, '}');
++					xfirst = false;
++				}
++				appendStringInfoString(&buf, "], \"formula_rows\": ");
++				exactcard_json_rows(&buf, rec->formula_rows);
++				appendStringInfoString(&buf, ", \"log_card\": ");
++				exactcard_json_double(&buf, rec->log_card);
++				appendStringInfoChar(&buf, '}');
++				first = false;
++			}
++			appendStringInfoChar(&buf, ']');
++		}
++
++		if (a->hashjoins != NIL)
++		{
++			bool		first = true;
++
++			appendStringInfoString(&buf, ", \"hashjoins\": [");
++			foreach(lc, a->hashjoins)
++			{
++				ExactCardHashRec *rec = lfirst(lc);
++
++				if (!first)
++					appendStringInfoChar(&buf, ',');
++				appendStringInfoString(&buf, "{\"relations\": ");
++				exactcard_json_canon(&buf, rec->relations);
++				appendStringInfoString(&buf, ", \"outer\": ");
++				exactcard_json_canon(&buf, rec->outer);
++				appendStringInfoString(&buf, ", \"inner\": ");
++				exactcard_json_canon(&buf, rec->inner);
++				appendStringInfo(&buf, ", \"crossing_count\": %d",
++								 rec->crossing_count);
++				if (rec->crossing_count == 1)
++				{
++					appendStringInfo(&buf,
++									 ", \"inner_endpoint\": %d, \"key_ndv\": " INT64_FORMAT,
++									 rec->inner_endpoint, rec->key_ndv);
++					appendStringInfoString(&buf, ", \"edge_selectivity\": ");
++					exactcard_json_double(&buf, rec->edge_selectivity);
++				}
++				appendStringInfoString(&buf, ", \"outer_rows\": ");
++				exactcard_json_rows(&buf, rec->outer_rows);
++				appendStringInfoString(&buf, ", \"inner_rows\": ");
++				exactcard_json_rows(&buf, rec->inner_rows);
++				appendStringInfoString(&buf, ", \"innerbucketsize\": ");
++				exactcard_json_double(&buf, rec->innerbucketsize);
++				appendStringInfoString(&buf, ", \"innermcvfreq\": ");
++				exactcard_json_double(&buf, rec->innermcvfreq);
++				appendStringInfo(&buf, ", \"numbuckets\": %d, \"numbatches\": %d",
++								 rec->numbuckets, rec->numbatches);
++				appendStringInfo(&buf, ", \"bucket_stats_computed\": %s",
++								 rec->bucket_stats_computed ? "true" : "false");
++				appendStringInfoString(&buf, ", \"hashjointuples\": ");
++				exactcard_json_rows(&buf, rec->hashjointuples);
++				appendStringInfoChar(&buf, '}');
++				first = false;
++			}
++			appendStringInfoChar(&buf, ']');
++		}
++
++		appendStringInfoChar(&buf, '}');
++	}
++
++	result = DirectFunctionCall1(jsonb_in, CStringGetDatum(buf.data));
++	pfree(buf.data);
++	PG_RETURN_DATUM(result);
++}
+diff --git a/src/backend/optimizer/util/meson.build b/src/backend/optimizer/util/meson.build
+index c50bcc4f74c..0f59ed4ea64 100644
+--- a/src/backend/optimizer/util/meson.build
++++ b/src/backend/optimizer/util/meson.build
+@@ -3,6 +3,7 @@
+ backend_sources += files(
+   'appendinfo.c',
+   'clauses.c',
++  'exactcard.c',
+   'extendplan.c',
+   'inherit.c',
+   'joininfo.c',
+diff --git a/src/backend/optimizer/util/pathnode.c b/src/backend/optimizer/util/pathnode.c
+index 3875e3dd571..fbf62e95495 100644
+--- a/src/backend/optimizer/util/pathnode.c
++++ b/src/backend/optimizer/util/pathnode.c
+@@ -22,6 +22,7 @@
+ #include "optimizer/appendinfo.h"
+ #include "optimizer/clauses.h"
+ #include "optimizer/cost.h"
++#include "optimizer/exactcard.h"
+ #include "optimizer/optimizer.h"
+ #include "optimizer/pathnode.h"
+ #include "optimizer/paths.h"
+@@ -43,8 +44,11 @@ typedef enum
+  * STD_FUZZ_FACTOR is the normal fuzz factor for compare_path_costs_fuzzily.
+  * XXX is it worth making this user-controllable?  It provides a tradeoff
+  * between planner runtime and the accuracy of path cost comparisons.
++ * Formula benchmarks preserve sub-1% cost differences so fuzzy pruning does
++ * not weaken the DP anchor relative to a heuristic.
+  */
+-#define STD_FUZZ_FACTOR 1.01
++#define STD_FUZZ_FACTOR \
++	(exactcard_mode == EXACTCARD_FORMULA ? 1.0 : 1.01)
+ 
+ static int	append_total_cost_compare(const ListCell *a, const ListCell *b);
+ static int	append_startup_cost_compare(const ListCell *a, const ListCell *b);
+diff --git a/src/backend/utils/misc/guc_parameters.dat b/src/backend/utils/misc/guc_parameters.dat
+index 07508f5d96b..23b86ef7493 100644
+--- a/src/backend/utils/misc/guc_parameters.dat
++++ b/src/backend/utils/misc/guc_parameters.dat
+@@ -1069,6 +1069,31 @@
+   boot_val => 'true',
+ },
+ 
++{ name => 'exactcard.audit', type => 'enum', context => 'PGC_USERSET', group => 'QUERY_TUNING_METHOD',
++  short_desc => 'Selects formula cardinality audit detail.',
++  long_desc => 'Valid values are off, summary, and trace.',
++  flags => 'GUC_EXPLAIN | GUC_NOT_IN_SAMPLE',
++  variable => 'exactcard_audit',
++  boot_val => 'EXACTCARD_AUDIT_OFF',
++  options => 'exactcard_audit_options',
++},
++
++{ name => 'exactcard.instance_id', type => 'string', context => 'PGC_USERSET', group => 'QUERY_TUNING_METHOD',
++  short_desc => 'Sets the formula cardinality benchmark instance.',
++  flags => 'GUC_EXPLAIN | GUC_NOT_IN_SAMPLE',
++  variable => 'exactcard_instance_id',
++  boot_val => '""',
++},
++
++{ name => 'exactcard.mode', type => 'enum', context => 'PGC_USERSET', group => 'QUERY_TUNING_METHOD',
++  short_desc => 'Selects formula cardinality injection for optimizer benchmarks.',
++  long_desc => 'Formula mode reads one benchmark instance from bench.join_order_relation and bench.join_order_edge.',
++  flags => 'GUC_EXPLAIN | GUC_NOT_IN_SAMPLE',
++  variable => 'exactcard_mode',
++  boot_val => 'EXACTCARD_OFF',
++  options => 'exactcard_mode_options',
++},
++
+ { name => 'exit_on_error', type => 'bool', context => 'PGC_USERSET', group => 'ERROR_HANDLING_OPTIONS',
+   short_desc => 'Terminate session on any error.',
+   variable => 'ExitOnAnyError',
+diff --git a/src/backend/utils/misc/guc_tables.c b/src/backend/utils/misc/guc_tables.c
+index 6d82539fd9f..7bd76e921bb 100644
+--- a/src/backend/utils/misc/guc_tables.c
++++ b/src/backend/utils/misc/guc_tables.c
+@@ -57,6 +57,7 @@
+ #include "libpq/scram.h"
+ #include "nodes/queryjumble.h"
+ #include "optimizer/cost.h"
++#include "optimizer/exactcard.h"
+ #include "optimizer/geqo.h"
+ #include "optimizer/optimizer.h"
+ #include "optimizer/paths.h"
+@@ -431,6 +432,19 @@ static const struct config_enum_entry goo_greedy_strategy_options[] = {
+ 	{NULL, 0, false}
+ };
+ 
++static const struct config_enum_entry exactcard_mode_options[] = {
++	{"off", EXACTCARD_OFF, false},
++	{"formula", EXACTCARD_FORMULA, false},
++	{NULL, 0, false}
++};
++
++static const struct config_enum_entry exactcard_audit_options[] = {
++	{"off", EXACTCARD_AUDIT_OFF, false},
++	{"summary", EXACTCARD_AUDIT_SUMMARY, false},
++	{"trace", EXACTCARD_AUDIT_TRACE, false},
++	{NULL, 0, false}
++};
++
+ static const struct config_enum_entry password_encryption_options[] = {
+ 	{"md5", PASSWORD_TYPE_MD5, false},
+ 	{"scram-sha-256", PASSWORD_TYPE_SCRAM_SHA_256, false},
+diff --git a/src/include/catalog/catversion.h b/src/include/catalog/catversion.h
+index f20ea73ed39..7598ed6e7e8 100644
+--- a/src/include/catalog/catversion.h
++++ b/src/include/catalog/catversion.h
+@@ -57,6 +57,6 @@
+  */
+ 
+ /*							yyyymmddN */
+-#define CATALOG_VERSION_NO	202607273
++#define CATALOG_VERSION_NO	202608061
+ 
+ #endif
+diff --git a/src/include/catalog/pg_proc.dat b/src/include/catalog/pg_proc.dat
+index f8a021987b5..ff0bba47591 100644
+--- a/src/include/catalog/pg_proc.dat
++++ b/src/include/catalog/pg_proc.dat
+@@ -12632,6 +12632,11 @@
+   proargnames => '{schemaname,relname,attname,inherited}',
+   prosrc => 'pg_clear_attribute_stats' },
+ 
++{ oid => '8060', descr => 'return audit data for the last formula cardinality plan',
++  proname => 'exactcard_last_audit', proisstrict => 'f', provolatile => 'v',
++  proparallel => 'u', prorettype => 'jsonb', proargtypes => '',
++  prosrc => 'exactcard_last_audit' },
++
+ # GiST stratnum implementations
+ { oid => '6347', descr => 'GiST support',
+   proname => 'gist_translate_cmptype_common', prorettype => 'int2',
+diff --git a/src/include/optimizer/exactcard.h b/src/include/optimizer/exactcard.h
+new file mode 100644
+index 00000000000..295a7c86565
+--- /dev/null
++++ b/src/include/optimizer/exactcard.h
+@@ -0,0 +1,50 @@
++/*-------------------------------------------------------------------------
++ *
++ * exactcard.h
++ *	  Formula cardinality support for join-order benchmarks.
++ *
++ * Portions Copyright (c) 1996-2026, PostgreSQL Global Development Group
++ * Portions Copyright (c) 1994, Regents of the University of California
++ *
++ * src/include/optimizer/exactcard.h
++ *
++ *-------------------------------------------------------------------------
++ */
++#ifndef EXACTCARD_H
++#define EXACTCARD_H
++
++#include "nodes/pathnodes.h"
++
++typedef enum ExactCardMode
++{
++	EXACTCARD_OFF,
++	EXACTCARD_FORMULA
++} ExactCardMode;
++
++typedef enum ExactCardAuditMode
++{
++	EXACTCARD_AUDIT_OFF,
++	EXACTCARD_AUDIT_SUMMARY,
++	EXACTCARD_AUDIT_TRACE
++} ExactCardAuditMode;
++
++extern PGDLLIMPORT int exactcard_mode;
++extern PGDLLIMPORT char *exactcard_instance_id;
++extern PGDLLIMPORT int exactcard_audit;
++
++extern void exactcard_set_baserel_size(PlannerInfo *root, RelOptInfo *rel);
++extern double exactcard_set_joinrel_rows(PlannerInfo *root,
++										 RelOptInfo *joinrel,
++										 RelOptInfo *outer_rel,
++										 RelOptInfo *inner_rel,
++										 SpecialJoinInfo *sjinfo,
++										 List *restrictlist,
++										 double native_rows);
++extern double exactcard_get_hashjoin_rows(PlannerInfo *root, HashPath *path,
++										  double innerbucketsize,
++										  double innermcvfreq,
++										  int numbuckets, int numbatches,
++										  bool bucket_stats_computed);
++extern Datum exactcard_last_audit(PG_FUNCTION_ARGS);
++
++#endif							/* EXACTCARD_H */
+diff --git a/src/test/regress/expected/exactcard.out b/src/test/regress/expected/exactcard.out
+new file mode 100644
+index 00000000000..e56b66541c6
+--- /dev/null
++++ b/src/test/regress/expected/exactcard.out
+@@ -0,0 +1,265 @@
++--
++-- exactcard: formula cardinality provider for join-order benchmarks
++--
++-- Proves the four things the benchmark relies on:
++--   1. off mode leaves planning unchanged;
++--   2. formula mode injects the analytic product-form cardinality, carried
++--      unclamped between join levels so the result is order-independent;
++--   3. the audit function reports the injected values for the qualification
++--      gate; and
++--   4. unsupported input fails closed.
++--
++-- Metadata tables mirror the benchmark's bench.join_order_* contract.
++CREATE SCHEMA bench;
++CREATE TABLE bench.join_order_relation (
++	instance_id		text,
++	canonical_id	int,
++	relation		regclass,
++	base_rows		float8,
++	base_pages		bigint
++);
++CREATE TABLE bench.join_order_edge (
++	instance_id		text,
++	left_id			int,
++	right_id		int,
++	-- Only fields consumed by the formula provider follow.
++	left_key_ndv	bigint,
++	right_key_ndv	bigint,
++	selectivity		float8
++);
++-- Empty join tables.  No data is loaded: formula mode takes cardinalities
++-- from the metadata, not from the planner's own row estimates.
++CREATE TABLE ec_r0 (j01 bigint);
++CREATE TABLE ec_r1 (j01 bigint, j12 bigint);
++CREATE TABLE ec_r2 (j12 bigint);
++CREATE TABLE ec_outsider (j01 bigint);
++-- Instance "demo": a three-relation chain 0-1-2.
++--   |r0| = 10   |r1| = 10   |r2| = 100000
++--   edge 0-1 selectivity 0.0005 -> C({0,1})   = 10*10*0.0005 = 0.05 (< 1)
++--   edge 1-2 selectivity 0.1    -> C({1,2})   = 10*100000*0.1 = 100000
++--                                  C({0,1,2}) = 500
++-- The first edge's key NDV is 10, so its native equality-clause
++-- selectivity is 0.1.  This deliberately differs from the logical 0.0005
++-- and proves that the provider keeps logical rows separate from Hash stats.
++-- The intermediate {0,1} is below one row.  Clamping it to 1 before the last
++-- join would inflate the three-way answer; carrying the unclamped log keeps
++-- it at the analytic 500 whichever way the join is built.
++INSERT INTO bench.join_order_relation VALUES
++	('demo', 0, 'ec_r0'::regclass, 10, 3),
++	('demo', 1, 'ec_r1'::regclass, 10, 5),
++	('demo', 2, 'ec_r2'::regclass, 100000, 700);
++INSERT INTO bench.join_order_edge VALUES
++	('demo', 0, 1, 10, 10, 0.0005),
++	('demo', 1, 2, 10, 10, 0.1);
++-- Helper: top-plan estimated rows, without the unstable cost columns.
++CREATE FUNCTION ec_plan_rows(q text) RETURNS bigint
++LANGUAGE plpgsql AS $$
++DECLARE j jsonb;
++BEGIN
++	EXECUTE 'EXPLAIN (FORMAT JSON) ' || q INTO j;
++	RETURN (j->0->'Plan'->>'Plan Rows')::bigint;
++END $$;
++-- Hash-only, fixed join order, so plan rows track the chosen cardinalities.
++-- Merge Join is disabled because exactcard does not model pre-filter rows.
++SET enable_mergejoin = off;
++SET enable_nestloop = off;
++SET enable_hashjoin = on;
++SET max_parallel_workers_per_gather = 0;
++SET join_collapse_limit = 1;
++SET from_collapse_limit = 1;
++-- Two syntactic join orders over the same graph: q1 builds the sub-one
++-- intermediate {0,1} first, q2 builds {1,2} first.
++\set q1 'SELECT 1 FROM (ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01) JOIN ec_r2 ON ec_r1.j12 = ec_r2.j12'
++\set q2 'SELECT 1 FROM (ec_r1 JOIN ec_r2 ON ec_r1.j12 = ec_r2.j12) JOIN ec_r0 ON ec_r0.j01 = ec_r1.j01'
++-- Off mode: native planning, which ignores the injected metadata and is
++-- reproducible across the two orders.
++SET exactcard.mode = off;
++SELECT ec_plan_rows(:'q1') <> 500			AS off_ignores_metadata,
++	   ec_plan_rows(:'q1') = ec_plan_rows(:'q2')	AS off_reproducible;
++ off_ignores_metadata | off_reproducible 
++----------------------+------------------
++ t                    | t
++(1 row)
++
++-- Formula mode: the analytic cardinality, identical for both join orders.
++SET exactcard.mode = formula;
++SET exactcard.instance_id = 'demo';
++SET exactcard.audit = trace;
++SELECT ec_plan_rows(:'q2') AS formula_q2;
++ formula_q2 
++------------
++        500
++(1 row)
++
++SELECT ec_plan_rows(:'q1') AS formula_q1;
++ formula_q1 
++------------
++        500
++(1 row)
++
++-- LinDP can form disconnected interval inputs.  A tree can then have more
++-- than one edge crossing the final Hash Join split; every edge must be a
++-- Hash clause and the output rows still come from the complete subset.
++\set q_multi 'SELECT 1 FROM (ec_r0 CROSS JOIN ec_r2) JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01 AND ec_r1.j12 = ec_r2.j12'
++SELECT ec_plan_rows(:'q_multi') AS formula_multi_crossing;
++ formula_multi_crossing 
++------------------------
++                    500
++(1 row)
++
++SELECT max((h->>'crossing_count')::int) AS max_crossing_count
++FROM jsonb_array_elements(exactcard_last_audit()->'hashjoins') h;
++ max_crossing_count 
++--------------------
++                  2
++(1 row)
++
++-- Plan shape: three empty tables joined by two hash joins.
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM (ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01)
++		JOIN ec_r2 ON ec_r1.j12 = ec_r2.j12;
++                    QUERY PLAN                    
++--------------------------------------------------
++ Hash Join
++   Hash Cond: (ec_r2.j12 = ec_r1.j12)
++   ->  Seq Scan on ec_r2
++   ->  Hash
++         ->  Hash Join
++               Hash Cond: (ec_r1.j01 = ec_r0.j01)
++               ->  Seq Scan on ec_r1
++               ->  Hash
++                     ->  Seq Scan on ec_r0
++(9 rows)
++
++-- Audit of the last formula plan (q1).
++SELECT a->>'active'						AS active,
++	   a->>'instance_id'				AS instance_id,
++	   (a->>'join_count')::int			AS join_count,
++	   (a->>'final_rows')::numeric		AS final_rows,
++	   jsonb_array_length(a->'base')	AS base_rels
++FROM (SELECT exactcard_last_audit() AS a) t;
++ active | instance_id | join_count | final_rows | base_rels 
++--------+-------------+------------+------------+-----------
++ true   | demo        |          2 |        500 |         3
++(1 row)
++
++-- Base cardinalities and pages come from the benchmark metadata.
++SELECT (b->>'canonical_id')::int	AS canon,
++	   (b->>'base_rows')::numeric	AS base_rows,
++	   (b->>'base_pages')::int		AS base_pages
++FROM jsonb_array_elements(exactcard_last_audit()->'base') b
++ORDER BY canon;
++ canon | base_rows | base_pages 
++-------+-----------+------------
++     0 |        10 |          3
++     1 |        10 |          5
++     2 |    100000 |        700
++(3 rows)
++
++-- The widest join's hash tuple count matches its injected rows.
++SELECT max((h->>'hashjointuples')::numeric) AS max_hashjointuples
++FROM jsonb_array_elements(exactcard_last_audit()->'hashjoins') h;
++ max_hashjointuples 
++--------------------
++                500
++(1 row)
++
++-- Logical edge selectivity drives the oracle, while key NDV remains the
++-- separately recorded Hash-statistics input.
++SELECT bool_or((h->>'edge_selectivity')::float8
++			   <> 1.0 / (h->>'key_ndv')::float8)
++			AS separates_logical_and_domain
++FROM jsonb_array_elements(exactcard_last_audit()->'hashjoins') h;
++ separates_logical_and_domain 
++------------------------------
++ t
++(1 row)
++
++-- The three-way join receives the analytic 500 in the provider audit.
++SELECT max((j->>'formula_rows')::numeric)
++		   FILTER (WHERE jsonb_array_length(j->'relations') = 3)	AS formula_rows
++FROM jsonb_array_elements(exactcard_last_audit()->'joins') j;
++ formula_rows 
++--------------
++          500
++(1 row)
++
++-- Fail closed: a relation outside the instance.
++\set VERBOSITY terse
++SET exactcard.audit = off;
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_outsider ON ec_r0.j01 = ec_outsider.j01;
++ERROR:  exactcard: relation "ec_outsider" is not part of instance "demo"
++-- Fail closed: no instance selected.
++SET exactcard.instance_id = '';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM (ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01)
++		JOIN ec_r2 ON ec_r1.j12 = ec_r2.j12;
++ERROR:  exactcard: exactcard.instance_id must be set when exactcard.mode is formula
++-- Fail closed: formula mode does not model base filters.
++SET exactcard.instance_id = 'demo';
++EXPLAIN (COSTS OFF) SELECT 1 FROM ec_r0 WHERE j01 = 1;
++ERROR:  exactcard: sampled, filtered, or non-table base relations are not supported
++-- Fail closed: malformed instance (duplicate canonical_id).
++INSERT INTO bench.join_order_relation VALUES
++	('dup', 0, 'ec_r0'::regclass, 10, 1),
++	('dup', 0, 'ec_r1'::regclass, 20, 1);
++SET exactcard.instance_id = 'dup';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01;
++ERROR:  exactcard: duplicate canonical_id 0 for instance "dup"
++-- Fail closed: malformed logical edge selectivity.
++INSERT INTO bench.join_order_relation VALUES
++	('bad_sel', 0, 'ec_r0'::regclass, 10, 1),
++	('bad_sel', 1, 'ec_r1'::regclass, 20, 1);
++INSERT INTO bench.join_order_edge VALUES
++	('bad_sel', 0, 1, 10, 10, 0);
++SET exactcard.instance_id = 'bad_sel';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01;
++ERROR:  exactcard: edge selectivity must be finite and in (0, 1]
++-- Fail closed: one relation cannot have multiple canonical ids.
++INSERT INTO bench.join_order_relation VALUES
++	('dup_rel', 0, 'ec_r0'::regclass, 10, 1),
++	('dup_rel', 1, 'ec_r0'::regclass, 20, 1);
++SET exactcard.instance_id = 'dup_rel';
++EXPLAIN (COSTS OFF) SELECT 1 FROM ec_r0;
++ERROR:  exactcard: relation "ec_r0" has multiple canonical ids for instance "dup_rel"
++-- Fail closed: edges use canonical endpoint order.
++INSERT INTO bench.join_order_relation VALUES
++	('bad_edge', 0, 'ec_r0'::regclass, 10, 1),
++	('bad_edge', 1, 'ec_r1'::regclass, 20, 1);
++INSERT INTO bench.join_order_edge VALUES
++	('bad_edge', 1, 0, 10, 10, 0.1);
++SET exactcard.instance_id = 'bad_edge';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01;
++ERROR:  exactcard: edge endpoints must satisfy left_id < right_id
++-- Fail closed: duplicate edges are not allowed.
++INSERT INTO bench.join_order_relation VALUES
++	('dup_edge', 0, 'ec_r0'::regclass, 10, 1),
++	('dup_edge', 1, 'ec_r1'::regclass, 20, 1);
++INSERT INTO bench.join_order_edge VALUES
++	('dup_edge', 0, 1, 10, 10, 0.1),
++	('dup_edge', 0, 1, 10, 10, 0.1);
++SET exactcard.instance_id = 'dup_edge';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01;
++ERROR:  exactcard: duplicate edge (0, 1) for instance "dup_edge"
++\set VERBOSITY default
++-- Back to off mode: planning is native again, unaffected by the metadata.
++SET exactcard.mode = off;
++RESET exactcard.instance_id;
++RESET exactcard.audit;
++SELECT ec_plan_rows(:'q1') <> 500 AS off_native_again;
++ off_native_again 
++------------------
++ t
++(1 row)
++
++DROP FUNCTION ec_plan_rows(text);
++DROP SCHEMA bench CASCADE;
++NOTICE:  drop cascades to 2 other objects
++DETAIL:  drop cascades to table bench.join_order_relation
++drop cascades to table bench.join_order_edge
++DROP TABLE ec_r0, ec_r1, ec_r2, ec_outsider;
+diff --git a/src/test/regress/parallel_schedule b/src/test/regress/parallel_schedule
+index 3325d92f265..442f79e66d0 100644
+--- a/src/test/regress/parallel_schedule
++++ b/src/test/regress/parallel_schedule
+@@ -67,6 +67,7 @@ test: select_into select_distinct select_distinct_on select_implicit select_havi
+ # Another group of parallel tests
+ # ----------
+ test: brin gin gist spgist privileges init_privs security_label collate matview lock replica_identity rowsecurity object_address tablesample groupingsets drop_operator password identity generated_stored join_hash
++test: exactcard
+ 
+ # ----------
+ # Additional JOIN ORDER tests
+diff --git a/src/test/regress/sql/exactcard.sql b/src/test/regress/sql/exactcard.sql
+new file mode 100644
+index 00000000000..409d82a0ade
+--- /dev/null
++++ b/src/test/regress/sql/exactcard.sql
+@@ -0,0 +1,209 @@
++--
++-- exactcard: formula cardinality provider for join-order benchmarks
++--
++-- Proves the four things the benchmark relies on:
++--   1. off mode leaves planning unchanged;
++--   2. formula mode injects the analytic product-form cardinality, carried
++--      unclamped between join levels so the result is order-independent;
++--   3. the audit function reports the injected values for the qualification
++--      gate; and
++--   4. unsupported input fails closed.
++--
++
++-- Metadata tables mirror the benchmark's bench.join_order_* contract.
++CREATE SCHEMA bench;
++CREATE TABLE bench.join_order_relation (
++	instance_id		text,
++	canonical_id	int,
++	relation		regclass,
++	base_rows		float8,
++	base_pages		bigint
++);
++CREATE TABLE bench.join_order_edge (
++	instance_id		text,
++	left_id			int,
++	right_id		int,
++	-- Only fields consumed by the formula provider follow.
++	left_key_ndv	bigint,
++	right_key_ndv	bigint,
++	selectivity		float8
++);
++
++-- Empty join tables.  No data is loaded: formula mode takes cardinalities
++-- from the metadata, not from the planner's own row estimates.
++CREATE TABLE ec_r0 (j01 bigint);
++CREATE TABLE ec_r1 (j01 bigint, j12 bigint);
++CREATE TABLE ec_r2 (j12 bigint);
++CREATE TABLE ec_outsider (j01 bigint);
++
++-- Instance "demo": a three-relation chain 0-1-2.
++--   |r0| = 10   |r1| = 10   |r2| = 100000
++--   edge 0-1 selectivity 0.0005 -> C({0,1})   = 10*10*0.0005 = 0.05 (< 1)
++--   edge 1-2 selectivity 0.1    -> C({1,2})   = 10*100000*0.1 = 100000
++--                                  C({0,1,2}) = 500
++-- The first edge's key NDV is 10, so its native equality-clause
++-- selectivity is 0.1.  This deliberately differs from the logical 0.0005
++-- and proves that the provider keeps logical rows separate from Hash stats.
++-- The intermediate {0,1} is below one row.  Clamping it to 1 before the last
++-- join would inflate the three-way answer; carrying the unclamped log keeps
++-- it at the analytic 500 whichever way the join is built.
++INSERT INTO bench.join_order_relation VALUES
++	('demo', 0, 'ec_r0'::regclass, 10, 3),
++	('demo', 1, 'ec_r1'::regclass, 10, 5),
++	('demo', 2, 'ec_r2'::regclass, 100000, 700);
++INSERT INTO bench.join_order_edge VALUES
++	('demo', 0, 1, 10, 10, 0.0005),
++	('demo', 1, 2, 10, 10, 0.1);
++
++-- Helper: top-plan estimated rows, without the unstable cost columns.
++CREATE FUNCTION ec_plan_rows(q text) RETURNS bigint
++LANGUAGE plpgsql AS $$
++DECLARE j jsonb;
++BEGIN
++	EXECUTE 'EXPLAIN (FORMAT JSON) ' || q INTO j;
++	RETURN (j->0->'Plan'->>'Plan Rows')::bigint;
++END $$;
++
++-- Hash-only, fixed join order, so plan rows track the chosen cardinalities.
++-- Merge Join is disabled because exactcard does not model pre-filter rows.
++SET enable_mergejoin = off;
++SET enable_nestloop = off;
++SET enable_hashjoin = on;
++SET max_parallel_workers_per_gather = 0;
++SET join_collapse_limit = 1;
++SET from_collapse_limit = 1;
++
++-- Two syntactic join orders over the same graph: q1 builds the sub-one
++-- intermediate {0,1} first, q2 builds {1,2} first.
++\set q1 'SELECT 1 FROM (ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01) JOIN ec_r2 ON ec_r1.j12 = ec_r2.j12'
++\set q2 'SELECT 1 FROM (ec_r1 JOIN ec_r2 ON ec_r1.j12 = ec_r2.j12) JOIN ec_r0 ON ec_r0.j01 = ec_r1.j01'
++
++-- Off mode: native planning, which ignores the injected metadata and is
++-- reproducible across the two orders.
++SET exactcard.mode = off;
++SELECT ec_plan_rows(:'q1') <> 500			AS off_ignores_metadata,
++	   ec_plan_rows(:'q1') = ec_plan_rows(:'q2')	AS off_reproducible;
++
++-- Formula mode: the analytic cardinality, identical for both join orders.
++SET exactcard.mode = formula;
++SET exactcard.instance_id = 'demo';
++SET exactcard.audit = trace;
++SELECT ec_plan_rows(:'q2') AS formula_q2;
++SELECT ec_plan_rows(:'q1') AS formula_q1;
++
++-- LinDP can form disconnected interval inputs.  A tree can then have more
++-- than one edge crossing the final Hash Join split; every edge must be a
++-- Hash clause and the output rows still come from the complete subset.
++\set q_multi 'SELECT 1 FROM (ec_r0 CROSS JOIN ec_r2) JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01 AND ec_r1.j12 = ec_r2.j12'
++SELECT ec_plan_rows(:'q_multi') AS formula_multi_crossing;
++SELECT max((h->>'crossing_count')::int) AS max_crossing_count
++FROM jsonb_array_elements(exactcard_last_audit()->'hashjoins') h;
++
++-- Plan shape: three empty tables joined by two hash joins.
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM (ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01)
++		JOIN ec_r2 ON ec_r1.j12 = ec_r2.j12;
++
++-- Audit of the last formula plan (q1).
++SELECT a->>'active'						AS active,
++	   a->>'instance_id'				AS instance_id,
++	   (a->>'join_count')::int			AS join_count,
++	   (a->>'final_rows')::numeric		AS final_rows,
++	   jsonb_array_length(a->'base')	AS base_rels
++FROM (SELECT exactcard_last_audit() AS a) t;
++
++-- Base cardinalities and pages come from the benchmark metadata.
++SELECT (b->>'canonical_id')::int	AS canon,
++	   (b->>'base_rows')::numeric	AS base_rows,
++	   (b->>'base_pages')::int		AS base_pages
++FROM jsonb_array_elements(exactcard_last_audit()->'base') b
++ORDER BY canon;
++
++-- The widest join's hash tuple count matches its injected rows.
++SELECT max((h->>'hashjointuples')::numeric) AS max_hashjointuples
++FROM jsonb_array_elements(exactcard_last_audit()->'hashjoins') h;
++
++-- Logical edge selectivity drives the oracle, while key NDV remains the
++-- separately recorded Hash-statistics input.
++SELECT bool_or((h->>'edge_selectivity')::float8
++			   <> 1.0 / (h->>'key_ndv')::float8)
++			AS separates_logical_and_domain
++FROM jsonb_array_elements(exactcard_last_audit()->'hashjoins') h;
++
++-- The three-way join receives the analytic 500 in the provider audit.
++SELECT max((j->>'formula_rows')::numeric)
++		   FILTER (WHERE jsonb_array_length(j->'relations') = 3)	AS formula_rows
++FROM jsonb_array_elements(exactcard_last_audit()->'joins') j;
++
++-- Fail closed: a relation outside the instance.
++\set VERBOSITY terse
++SET exactcard.audit = off;
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_outsider ON ec_r0.j01 = ec_outsider.j01;
++
++-- Fail closed: no instance selected.
++SET exactcard.instance_id = '';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM (ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01)
++		JOIN ec_r2 ON ec_r1.j12 = ec_r2.j12;
++
++-- Fail closed: formula mode does not model base filters.
++SET exactcard.instance_id = 'demo';
++EXPLAIN (COSTS OFF) SELECT 1 FROM ec_r0 WHERE j01 = 1;
++
++-- Fail closed: malformed instance (duplicate canonical_id).
++INSERT INTO bench.join_order_relation VALUES
++	('dup', 0, 'ec_r0'::regclass, 10, 1),
++	('dup', 0, 'ec_r1'::regclass, 20, 1);
++SET exactcard.instance_id = 'dup';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01;
++
++-- Fail closed: malformed logical edge selectivity.
++INSERT INTO bench.join_order_relation VALUES
++	('bad_sel', 0, 'ec_r0'::regclass, 10, 1),
++	('bad_sel', 1, 'ec_r1'::regclass, 20, 1);
++INSERT INTO bench.join_order_edge VALUES
++	('bad_sel', 0, 1, 10, 10, 0);
++SET exactcard.instance_id = 'bad_sel';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01;
++
++-- Fail closed: one relation cannot have multiple canonical ids.
++INSERT INTO bench.join_order_relation VALUES
++	('dup_rel', 0, 'ec_r0'::regclass, 10, 1),
++	('dup_rel', 1, 'ec_r0'::regclass, 20, 1);
++SET exactcard.instance_id = 'dup_rel';
++EXPLAIN (COSTS OFF) SELECT 1 FROM ec_r0;
++
++-- Fail closed: edges use canonical endpoint order.
++INSERT INTO bench.join_order_relation VALUES
++	('bad_edge', 0, 'ec_r0'::regclass, 10, 1),
++	('bad_edge', 1, 'ec_r1'::regclass, 20, 1);
++INSERT INTO bench.join_order_edge VALUES
++	('bad_edge', 1, 0, 10, 10, 0.1);
++SET exactcard.instance_id = 'bad_edge';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01;
++
++-- Fail closed: duplicate edges are not allowed.
++INSERT INTO bench.join_order_relation VALUES
++	('dup_edge', 0, 'ec_r0'::regclass, 10, 1),
++	('dup_edge', 1, 'ec_r1'::regclass, 20, 1);
++INSERT INTO bench.join_order_edge VALUES
++	('dup_edge', 0, 1, 10, 10, 0.1),
++	('dup_edge', 0, 1, 10, 10, 0.1);
++SET exactcard.instance_id = 'dup_edge';
++EXPLAIN (COSTS OFF) SELECT 1
++	FROM ec_r0 JOIN ec_r1 ON ec_r0.j01 = ec_r1.j01;
++\set VERBOSITY default
++
++-- Back to off mode: planning is native again, unaffected by the metadata.
++SET exactcard.mode = off;
++RESET exactcard.instance_id;
++RESET exactcard.audit;
++SELECT ec_plan_rows(:'q1') <> 500 AS off_native_again;
++
++DROP FUNCTION ec_plan_rows(text);
++DROP SCHEMA bench CASCADE;
++DROP TABLE ec_r0, ec_r1, ec_r2, ec_outsider;
+diff --git a/src/tools/pgindent/typedefs.list b/src/tools/pgindent/typedefs.list
+index 85d989f395d..60f960dd38c 100644
+--- a/src/tools/pgindent/typedefs.list
++++ b/src/tools/pgindent/typedefs.list
+@@ -771,6 +771,16 @@ EventTriggerData
+ EventTriggerEvent
+ EventTriggerInfo
+ EventTriggerQueryState
++ExactCardAudit
++ExactCardAuditMode
++ExactCardBaseRec
++ExactCardEdge
++ExactCardHashRec
++ExactCardJoinRec
++ExactCardMeta
++ExactCardMode
++ExactCardOidEntry
++ExactCardRelState
+ ExceptionLabelMap
+ ExceptionMap
+ ExecAuxRowMark
+-- 
+2.50.1 (Apple Git-155)
