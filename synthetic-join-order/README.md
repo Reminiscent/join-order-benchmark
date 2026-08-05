@@ -4,6 +4,9 @@ This directory defines deterministic synthetic workloads for comparing
 join-order search inside PostgreSQL. Each generated case is qualified and
 planned with `EXPLAIN`; queries are never executed. The matrix runner repeats
 the same case protocol across relation counts, seeds, and algorithm variants.
+The
+[design document](../SYNTHETIC_JOIN_ORDER_BENCHMARK.md) defines the complete
+measurement protocol and claim boundaries.
 
 ## How to read this workload
 
@@ -21,34 +24,14 @@ generated result:
 
 The remaining generated statistics and metadata are integration artifacts.
 Read them, or the Python implementation, only when reviewing the corresponding
-boundary. For graph and cardinality generation, follow:
+boundary:
 
-1. `generate_graph()` in `graph.py` expands the three-field spec;
-2. `subset_cardinality()` in `cardinality.py` defines the logical oracle;
-3. `compile_graph()` in `compile.py` produces the generated files.
-
-`validate_graph()` and the offline tests enforce the same contract; they are
-useful for implementation review, but are not additional workload semantics.
-
-To review the PostgreSQL integration, continue with:
-
-1. [`patches/README.md`](../patches/README.md) for the formula provider boundary;
-2. `tools/qualify_synthetic_join_order_pg.py` for one-case lifecycle;
-3. `plan.py` for installation and `EXPLAIN` evidence collection;
-4. `qualify.py` for the fail-closed checks applied to that evidence.
-
-These files explain how the model reaches PostgreSQL; they do not redefine the
-workload formula above.
-
-For matrix execution and result interpretation, read:
-
-1. `tools/run_synthetic_join_order_matrix.py` for CLI inputs and provenance;
-2. `run.py` for one case across algorithms;
-3. `matrix.py` for sizes, seeds, lifecycle, and durable outputs;
-4. `report.py` for common-success aggregation and `report.md`.
-
-The matrix code is only necessary when reviewing measurement policy. It is not
-needed to understand how one graph or one subset cardinality is defined.
+- graph generation: `graph.py` → `cardinality.py` → `compile.py`;
+- PostgreSQL integration: [`patches/README.md`](../patches/README.md) →
+  `plan.py` → `qualify.py`;
+- matrix policy and reporting: `run.py` → `matrix.py` → `report.py`;
+- reproduction and claim boundaries:
+  [design Section 9](../SYNTHETIC_JOIN_ORDER_BENCHMARK.md#9-reproduce-and-inspect).
 
 ## What the workload models
 
@@ -68,6 +51,7 @@ small spec
     -> tree-shaped join graph with node rows and edge behavior
     -> graph.md reading view, graph.json, and subset-cardinality formula
     -> PostgreSQL schema, flat query, statistics, and provider metadata
+    -> EXPLAIN under each join-order algorithm
 ```
 
 The paper does not fully specify its graph generator, distributions, or seeds.

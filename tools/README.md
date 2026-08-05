@@ -6,6 +6,24 @@ benchmark results.  The important split is:
 - `query_manifest.csv` is the tracked workload metadata used by the runner.
 - `build_query_manifest.py` rebuilds and checks that metadata from SQL files.
 - `render_review_tables.py` turns run outputs into the reviewer workbook.
+- `generate_synthetic_join_order.py` generates or verifies one plan-only random-tree
+  golden case and can run offline compiler/oracle qualification.
+- `qualify_synthetic_join_order_pg.py` installs one generated case in a clean database,
+  runs the small PostgreSQL-side golden trace, and removes that case afterward;
+  `--audit summary` is available for bounded diagnosis.
+- `run_synthetic_join_order_matrix.py` runs the fixed synthetic generator, records
+  the declared PostgreSQL source revision and live server version, treats
+  timeout as coverage, limits DP by size, and fails fast on correctness errors.
+- `render_synthetic_join_order_report.py` renders one existing matrix as a concise
+  `report.md` that compares every algorithm run for an instance with that
+  instance's lowest successful PostgreSQL Total Cost.
+
+The synthetic workload model is documented in
+[`synthetic-join-order/README.md`](../synthetic-join-order/README.md).
+The full protocol and concise commands are in
+[`SYNTHETIC_JOIN_ORDER_BENCHMARK.md`](../SYNTHETIC_JOIN_ORDER_BENCHMARK.md).
+Its benchmark-only exactcard support is an email patch for `git am`; see the
+[`patches` guide](../patches/README.md) before reviewing or applying it.
 
 ## Query Manifest
 
