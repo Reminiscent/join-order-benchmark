@@ -15,6 +15,8 @@ discussion.
 | --- | --- |
 | Reproduce a run | [REPRODUCE.md](REPRODUCE.md) |
 | Understand the run protocol | [BENCHMARK_RUNS.md](BENCHMARK_RUNS.md) |
+| Review the synthetic join-order design | [SYNTHETIC_JOIN_ORDER_BENCHMARK.md](SYNTHETIC_JOIN_ORDER_BENCHMARK.md) |
+| Reproduce the synthetic join-order matrix | [synthetic-join-order/README.md](synthetic-join-order/README.md) |
 | Check workload coverage | [WORKLOADS.md](WORKLOADS.md) |
 | Inspect output files | [OUTPUTS.md](OUTPUTS.md) |
 | Read the benchmark runner code | [bench/README.md](bench/README.md) |

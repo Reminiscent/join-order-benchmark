@@ -5,6 +5,9 @@ can represent a join-order algorithm or the same algorithm with different
 parameters.  Edit this file to add algorithms or parameter settings, then pick
 the desired subset with `--variants`.
 
+This is the checked-in runtime registry, not a sample file.  Both the regular
+benchmark runner and the synthetic join-order matrix runner load selected entries from it.
+
 Variants marked with `baseline = true` are used when `--variants` is omitted.
 They are also the reviewer-table references when they are part of a run.
 The checked-in file marks `dp` and `geqo` as baselines.
@@ -42,7 +45,16 @@ Variant entries use these fields:
   ratio references in reviewer tables.
 - `session_gucs`
   Variant-specific session-level PostgreSQL parameters.  Every listed GUC for
-  a selected variant must exist on the target PostgreSQL server.
+  a selected variant must exist on the target PostgreSQL server.  Variant
+  entries are trusted benchmark configuration and are applied after common
+  settings, so an intentional duplicate overrides the common value.  The run
+  metadata records the effective configuration inputs for review and replay.
+
+The checked-in variants assume PostgreSQL's default `geqo=on` and that extension
+join searches are disabled by default. They contain only the settings normally
+required to select each algorithm. If a server changes those defaults, add the
+corresponding explicit overrides to the affected variant entries before
+running it.
 
 Put a setting in `benchmark_settings.toml` only when it should apply to every
 variant in the run.

@@ -16,6 +16,7 @@ the public benchmark protocol; use this file as the code map.
 | [bench_exec.py](bench_exec.py) | PostgreSQL execution helpers: statistics maintenance, GUC validation, and `EXPLAIN ANALYZE` execution/parsing. |
 | [bench_results.py](bench_results.py) | Output schemas and writers for `run.json`, `raw.csv`, `summary.csv`, and `plans/`. |
 | [bench_review_tables.py](bench_review_tables.py) | Optional `review.xlsx` rendering from an existing run; not needed to understand the run protocol. |
+| [synthetic_join_order/](synthetic_join_order/) | Plan-only synthetic join-order generation, qualification, execution, and reporting. See its short [README](synthetic_join_order/README.md). |
 
 ## Data Flow
 
@@ -65,3 +66,9 @@ tools/render_review_tables.py
 
 Scenario and dataset coverage is described in [../WORKLOADS.md](../WORKLOADS.md).
 Config file fields are described in [../config/README.md](../config/README.md).
+
+The plan-only random-tree benchmark is a separate workflow from the
+`bench.py` execution-time workloads above. Its model is documented in
+[../synthetic-join-order/README.md](../synthetic-join-order/README.md), and its
+measurement protocol is documented in
+[../SYNTHETIC_JOIN_ORDER_BENCHMARK.md](../SYNTHETIC_JOIN_ORDER_BENCHMARK.md).
