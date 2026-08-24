@@ -23,6 +23,7 @@ from bench_config import (
     resolve_dataset_runs,
     resolve_prepare_dataset_runs,
     resolve_variant_names,
+    select_variant_names,
     select_queries,
 )
 
@@ -150,6 +151,18 @@ session_gucs = { geqo_threshold = 2, enable_my_algo = "on" }
         names = resolve_variant_names(self.make_scenario(), variants, None)
 
         self.assertEqual(names, ("dp", "geqo"))
+
+    def test_select_variant_names_preserves_override_order(self) -> None:
+        variants = {
+            "dp": bench_config.Variant(name="dp", label="dp", session_gucs=(), baseline=True),
+            "geqo": bench_config.Variant(name="geqo", label="GEQO", session_gucs=(), baseline=True),
+            "my_algo": bench_config.Variant(name="my_algo", label="My Algorithm", session_gucs=()),
+        }
+
+        self.assertEqual(
+            select_variant_names(variants, "my_algo,geqo"),
+            ("my_algo", "geqo"),
+        )
 
     def test_resolve_variant_names_requires_baseline_when_no_override(self) -> None:
         variants = {

@@ -238,26 +238,35 @@ def select_queries(spec: ResolvedDatasetRun) -> list[QueryMeta]:
 # These helpers turn selected scenario/variant choices into concrete work.
 
 
+def select_variant_names(
+    variants: dict[str, Variant], override_csv: Optional[str]
+) -> tuple[str, ...]:
+    """Select configured baselines or a validated CLI override."""
+    if override_csv:
+        names = tuple(parse_csv_list(override_csv))
+    else:
+        names = tuple(name for name, variant in variants.items() if variant.baseline)
+    if not names:
+        raise ValueError(
+            "no configured baseline variants; pass --variants or mark at least "
+            "one variant with baseline = true"
+        )
+    unknown = tuple(name for name in names if name not in variants)
+    if unknown:
+        raise ValueError(f"unknown variants: {', '.join(unknown)}")
+    return names
+
+
 def resolve_variant_names(
     scenario: Scenario,
     variants: dict[str, Variant],
     override_csv: Optional[str],
 ) -> tuple[str, ...]:
     """Resolve the effective variant order for a scenario run."""
-
-    if override_csv:
-        names = tuple(parse_csv_list(override_csv))
-    else:
-        names = tuple(name for name, variant in variants.items() if variant.baseline)
-    if not names:
-        die(
-            f"scenario '{scenario.name}' has no configured baseline variants; "
-            "pass --variants or mark at least one variant with baseline = true"
-        )
-    for name in names:
-        if name not in variants:
-            die(f"unknown variant '{name}' (see: python3 bench/bench.py list variants)")
-    return names
+    try:
+        return select_variant_names(variants, override_csv)
+    except ValueError as exc:
+        die(f"scenario '{scenario.name}': {exc}")
 
 
 def dataset_db_name(dataset: str) -> str:
