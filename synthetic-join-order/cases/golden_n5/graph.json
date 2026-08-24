@@ -1,0 +1,102 @@
+{
+  "cardinality_model": {
+    "anchor_relation": 0,
+    "budget": 100.0,
+    "contraction_log_budget": 4.605170185988092,
+    "expanding_edge_count": 2,
+    "expansion_log_budget": 3.5065799083444853,
+    "maximum_connected_log_rows": 14.206560629299172,
+    "minimum_connected_log_rows": 3.8308129500026027,
+    "neutral_edge_count": 0,
+    "root_growth_factor": 0.333340670422249,
+    "root_log_rows": 9.601390443311082,
+    "selective_edge_count": 2
+  },
+  "edges": [
+    {
+      "child": 2,
+      "growth_factor": 11.518042888331637,
+      "growth_role": "expanding",
+      "id": "e_0000_0002",
+      "key_overlap_fraction": 0.21985721716333298,
+      "left": 0,
+      "left_key_ndv": 3766,
+      "parent": 0,
+      "right": 2,
+      "right_key_ndv": 3766,
+      "selectivity": 5.837950535404487e-05
+    },
+    {
+      "child": 3,
+      "growth_factor": 0.2082872343172981,
+      "growth_role": "selective",
+      "id": "e_0001_0003",
+      "key_overlap_fraction": 0.18036162893365723,
+      "left": 1,
+      "left_key_ndv": 13172,
+      "parent": 1,
+      "right": 3,
+      "right_key_ndv": 666513,
+      "selectivity": 2.706048178109913e-07
+    },
+    {
+      "child": 1,
+      "growth_factor": 0.048010623564026585,
+      "growth_role": "selective",
+      "id": "e_0001_0004",
+      "key_overlap_fraction": 0.04800697894066334,
+      "left": 1,
+      "left_key_ndv": 13172,
+      "parent": 4,
+      "right": 4,
+      "right_key_ndv": 4609,
+      "selectivity": 3.6446233632450152e-06
+    },
+    {
+      "child": 4,
+      "growth_factor": 2.894073877428781,
+      "growth_role": "expanding",
+      "id": "e_0002_0004",
+      "key_overlap_fraction": 0.5292200170656101,
+      "left": 2,
+      "left_key_ndv": 843,
+      "parent": 2,
+      "right": 4,
+      "right_key_ndv": 843,
+      "selectivity": 0.0006277817521537486
+    }
+  ],
+  "format": "synthetic-join-order-graph",
+  "nodes": [
+    {
+      "base_rows": 44355,
+      "id": 0,
+      "payload_width": 49
+    },
+    {
+      "base_rows": 13173,
+      "id": 1,
+      "payload_width": 17
+    },
+    {
+      "base_rows": 197296,
+      "id": 2,
+      "payload_width": 160
+    },
+    {
+      "base_rows": 769710,
+      "id": 3,
+      "payload_width": 21
+    },
+    {
+      "base_rows": 4610,
+      "id": 4,
+      "payload_width": 244
+    }
+  ],
+  "source_spec": {
+    "cardinality_seed": 1002,
+    "graph_seed": 7,
+    "n": 5
+  }
+}
