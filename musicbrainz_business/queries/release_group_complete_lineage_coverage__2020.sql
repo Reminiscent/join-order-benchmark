@@ -1,0 +1,79 @@
+-- Query: release_group_complete_lineage_coverage__2020
+-- Question: Which classified release groups have at least one 2020 release path with positive community-tag coverage, territory, label, medium, ISRC recording and performance-linked ISWC work metadata?
+-- Inclusion rule: This is existential complete-path coverage, not proof that every release or track is complete. Community tags must have a positive aggregate vote count.
+SELECT count(DISTINCT v001."id")
+FROM
+  musicbrainz."release_group" AS v001,
+  musicbrainz."release_group_primary_type" AS v002,
+  musicbrainz."release_group_secondary_type_join" AS v003,
+  musicbrainz."release_group_secondary_type" AS v004,
+  musicbrainz."artist_credit" AS v005,
+  musicbrainz."artist_credit_name" AS v006,
+  musicbrainz."artist" AS v007,
+  musicbrainz."artist_type" AS v008,
+  musicbrainz."release_group_tag" AS v009,
+  musicbrainz."tag" AS v010,
+  musicbrainz."release" AS v011,
+  musicbrainz."release_status" AS v012,
+  musicbrainz."release_packaging" AS v013,
+  musicbrainz."language" AS v014,
+  musicbrainz."script" AS v015,
+  musicbrainz."release_country" AS v016,
+  musicbrainz."country_area" AS v017,
+  musicbrainz."area" AS v018,
+  musicbrainz."iso_3166_1" AS v019,
+  musicbrainz."release_label" AS v020,
+  musicbrainz."label" AS v021,
+  musicbrainz."label_type" AS v022,
+  musicbrainz."medium" AS v023,
+  musicbrainz."medium_format" AS v024,
+  musicbrainz."track" AS v025,
+  musicbrainz."recording" AS v026,
+  musicbrainz."isrc" AS v027,
+  musicbrainz."l_recording_work" AS v028,
+  musicbrainz."link" AS v029,
+  musicbrainz."link_type" AS v030,
+  musicbrainz."work" AS v031,
+  musicbrainz."work_type" AS v032,
+  musicbrainz."iswc" AS v033,
+  musicbrainz."work_language" AS v034,
+  musicbrainz."language" AS v035
+WHERE
+  v001."type" = v002."id"
+  AND v003."release_group" = v001."id"
+  AND v003."secondary_type" = v004."id"
+  AND v001."artist_credit" = v005."id"
+  AND v006."artist_credit" = v005."id"
+  AND v006."artist" = v007."id"
+  AND v007."type" = v008."id"
+  AND v009."release_group" = v001."id"
+  AND v009."tag" = v010."id"
+  AND v011."release_group" = v001."id"
+  AND v011."status" = v012."id"
+  AND v011."packaging" = v013."id"
+  AND v011."language" = v014."id"
+  AND v011."script" = v015."id"
+  AND v016."release" = v011."id"
+  AND v016."country" = v017."area"
+  AND v017."area" = v018."id"
+  AND v019."area" = v018."id"
+  AND v020."release" = v011."id"
+  AND v020."label" = v021."id"
+  AND v021."type" = v022."id"
+  AND v023."release" = v011."id"
+  AND v023."format" = v024."id"
+  AND v025."medium" = v023."id"
+  AND v025."recording" = v026."id"
+  AND v027."recording" = v026."id"
+  AND v028."entity0" = v026."id"
+  AND v028."link" = v029."id"
+  AND v029."link_type" = v030."id"
+  AND v028."entity1" = v031."id"
+  AND v031."type" = v032."id"
+  AND v033."work" = v031."id"
+  AND v034."work" = v031."id"
+  AND v034."language" = v035."id"
+  AND v011."barcode" IS NOT NULL
+  AND v016."date_year" = 2020
+  AND v009."count" > 0
+  AND v030."gid" IN ('a3005666-a872-32c3-ad06-98af558e99b0'::uuid);

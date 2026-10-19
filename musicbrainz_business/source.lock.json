@@ -1,0 +1,54 @@
+{
+  "license": {
+    "name": "GNU General Public License Version 2 or later",
+    "path": "COPYING.md",
+    "sha256": "8603c2b11afacfcdf712ebb4894ed1c1e82d8114e2dda819b45dc5b74a1b6264"
+  },
+  "repository": "https://github.com/metabrainz/musicbrainz-server.git",
+  "revision": "cff977f0ba8f06d5fa594e7590f6a134b1a5a22c",
+  "official_sample_compatible_revision": "7a5a5a23e3d2887b79508129ca36fdf4ff74c3a6",
+  "official_sample_compatibility_evidence": "This was the latest upstream commit before sample 20260901-000002. All eight SQL files used by load_official_sample.py are byte-identical at this revision and the pinned workload revision.",
+  "source_files": [
+    {
+      "path": "admin/sql/CreateTables.sql",
+      "sha256": "92d1981a0d4f5032bca1565d27fafa8a0eac4d11b7f34feab71bfde8a00ecb13"
+    },
+    {
+      "path": "admin/sql/CreatePrimaryKeys.sql",
+      "sha256": "7875b55ebab0e99326bfc2ed6d12289e912a137e67d8c3f4269cbb16e021016e"
+    },
+    {
+      "path": "admin/sql/CreateFKConstraints.sql",
+      "sha256": "c26fe5064af462526f9c9035e526a93d8b79800b8aa8ff116ad26855c1fe540c"
+    },
+    {
+      "path": "admin/sql/CreateTypes.sql",
+      "sha256": "985f3e2f0c635731f1650baceaece31fd0d48bf97b3645f7b2b3969b704738dc"
+    },
+    {
+      "path": "admin/sql/CreateConstraints.sql",
+      "sha256": "12ab81186b805e86790cdb0ed4b53ce604e305528d63a07d1ea188093695bbcd"
+    },
+    {
+      "path": "admin/sql/CreateIndexes.sql",
+      "sha256": "80d47424217936583e48a7a27ca2b4d83e3419a0aa056b0c416b28ce228d7da2"
+    },
+    {
+      "path": "admin/sql/Extensions.sql",
+      "sha256": "50edd0c5bba6921f01a163b508dee6c2b64beeb28f8152348c822bd756243ab5"
+    },
+    {
+      "path": "admin/sql/CreateCollations.sql",
+      "sha256": "78a6324f945a971870e1f4a8abb25c801c253642fff3f07da67d399a92a56004"
+    },
+    {
+      "path": "admin/sql/CreateSearchConfiguration.sql",
+      "sha256": "48f4b7517f615006ac9837f72091b24afb333651fff117d316e42ca0490d6f77"
+    },
+    {
+      "path": "admin/sql/CreateFunctions.sql",
+      "sha256": "c1dcf14ada350c0b3550a40f900894584d0c130c83b994f10d4f51ea80612925"
+    }
+  ],
+  "upstream_checked_at": "2026-09-08"
+}

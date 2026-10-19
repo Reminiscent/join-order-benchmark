@@ -1,0 +1,45 @@
+{
+  "checked_at": "2026-09-10",
+  "datasets": {
+    "official_sample": {
+      "snapshot": "20260901-000002",
+      "source": "https://ftp.musicbrainz.org/pub/musicbrainz/data/sample/20260901-000002/",
+      "schema_sequence": 31,
+      "compatible_schema_revision": "7a5a5a23e3d2887b79508129ca36fdf4ff74c3a6",
+      "compatibility_evidence": "Latest upstream commit before the sample timestamp. The eight SQL files used by load_official_sample.py are byte-identical at this revision and workload revision cff977f0ba8f06d5fa594e7590f6a134b1a5a22c.",
+      "signing_key_fingerprint": "D5E63B4BDCCE195642948684B8FC2375C777580F",
+      "files": [
+        {
+          "bytes": 358578548,
+          "license": "CC-BY-NC-SA-3.0-US",
+          "name": "mbdump-sample.tar.xz",
+          "role": "official monthly development sample",
+          "sha256": "8c692d81e4c94ac30cceb7ad981a9e047981298484a9e06b827c5a0ba61a962a",
+          "signature": "mbdump-sample.tar.xz.asc"
+        }
+      ]
+    },
+    "official_full": {
+      "snapshot": "20260905-002519",
+      "source": "https://ftp.musicbrainz.org/pub/musicbrainz/data/fullexport/20260905-002519/",
+      "compatible_schema_revision": "cff977f0ba8f06d5fa594e7590f6a134b1a5a22c",
+      "files": [
+        {
+          "bytes": 7501059582,
+          "license": "CC0-1.0",
+          "name": "mbdump.tar.bz2",
+          "role": "core catalog",
+          "sha256": "5cd98ffa443e2fde3517d36417d6c1d67960025058ba1411291bb7e1adcd3292"
+        },
+        {
+          "bytes": 515204279,
+          "license": "CC-BY-NC-SA-3.0",
+          "name": "mbdump-derived.tar.bz2",
+          "role": "annotations, ratings, tags, and search-derived data",
+          "sha256": "2f36b6a656632e9c6c9718dc9f01fea9282ed23b615ecd7344def082dec24ce8"
+        }
+      ]
+    }
+  },
+  "selection": "Use official_sample first. Upgrade to official_full only if the sample-covered FK graph cannot support the required workload or sample results need full-scale confirmation."
+}
