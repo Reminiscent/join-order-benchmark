@@ -132,6 +132,8 @@ def verify(entries: list[QueryEntry]) -> None:
 
     assert_ds_count("job", 113)
     assert_ds_count("job_complex", 30)
+    assert_ds_count("musicbrainz_business", 44)
+    assert_ds_range("musicbrainz_business", 12, 51)
 
 
 def main() -> None:
@@ -170,6 +172,11 @@ def main() -> None:
     datasets += build_file_dataset(
         "imdb_ceb_3k",
         list(iter_sql_files((REPO_ROOT / "imdb_pg_dataset" / "ceb-imdb-3k").rglob("*.sql"))),
+    )
+
+    datasets += build_file_dataset(
+        "musicbrainz_business",
+        list(iter_sql_files((REPO_ROOT / "musicbrainz_business" / "queries").glob("*.sql"))),
     )
 
     with out_path.open("w", newline="") as f:

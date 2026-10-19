@@ -33,6 +33,11 @@ label = "GOO Combined"
 session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "combined" }
 
 [[variant]]
+name = "goo_combined_lindp"
+label = "GOO Combined + LinDP"
+session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "combined_lindp" }
+
+[[variant]]
 name = "hybrid_search"
 label = "Hybrid Search"
 session_gucs = { geqo_threshold = 2, enable_goo_join_search = "on", goo_greedy_strategy = "hybrid" }

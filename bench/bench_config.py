@@ -51,6 +51,10 @@ PLANNING_DATASETS = (
     "gpuqo_clique_small",
 )
 
+MUSICBRAINZ_DATASETS = (
+    "musicbrainz_business",
+)
+
 IMDB_DATASETS = {"job", "job_complex", "imdb_ceb_3k"}
 
 DEFAULT_DB_BY_DATASET = {
@@ -62,6 +66,7 @@ DEFAULT_DB_BY_DATASET = {
     "gpuqo_clique_small": "gpuqo_clique_small_bench",
     "gpuqo_star_small": "gpuqo_star_small_bench",
     "gpuqo_snowflake_small": "gpuqo_snowflake_small_bench",
+    "musicbrainz_business": "musicbrainz_bench",
 }
 
 
@@ -88,6 +93,11 @@ def load_scenarios() -> dict[str, Scenario]:
             name="planning",
             description="Self-contained synthetic workloads for planning/search-space stress.",
             datasets=PLANNING_DATASETS,
+        ),
+        Scenario(
+            name="musicbrainz",
+            description="Business-oriented wide joins over the official MusicBrainz catalog.",
+            datasets=MUSICBRAINZ_DATASETS,
         ),
     )
     return {scenario.name: scenario for scenario in scenarios}
@@ -380,5 +390,11 @@ def dataset_prepare_scripts(dataset: str) -> tuple[Path, Path, Optional[Path], b
         name = dataset.removeprefix("gpuqo_").replace("_", "-")
         base = REPO_ROOT / "postgres-gpuqo" / "scripts" / "databases" / name
         return (base / "schema.sql", base / "load.sql", None, False)
+
+    if dataset == "musicbrainz_business":
+        die(
+            "dataset 'musicbrainz_business' uses an externally loaded database; "
+            "see musicbrainz_business/README.md"
+        )
 
     die(f"dataset '{dataset}' is not supported by prepare")

@@ -17,6 +17,8 @@ from bench_common import QueryMeta, ResolvedDatasetRun, Scenario
 import bench_config
 import bench
 from bench_config import (
+    dataset_db_name,
+    dataset_prepare_scripts,
     load_run_settings,
     load_scenarios,
     load_variants,
@@ -40,6 +42,10 @@ class BenchConfigTests(unittest.TestCase):
 
         self.assertEqual(variants["dp"].label, "dp")
         self.assertEqual(variants["geqo"].label, "GEQO")
+        self.assertEqual(
+            dict(variants["goo_combined_lindp"].session_gucs)["goo_greedy_strategy"],
+            "combined_lindp",
+        )
         self.assertTrue(variants["dp"].baseline)
         self.assertTrue(variants["geqo"].baseline)
 
@@ -57,7 +63,7 @@ class BenchConfigTests(unittest.TestCase):
     def test_load_scenarios_returns_public_scenarios(self) -> None:
         scenarios = load_scenarios()
 
-        self.assertEqual(tuple(scenarios), ("main", "extended", "planning"))
+        self.assertEqual(tuple(scenarios), ("main", "extended", "planning", "musicbrainz"))
         self.assertEqual(
             list(scenarios["main"].datasets),
             ["job", "job_complex"],
@@ -75,6 +81,10 @@ class BenchConfigTests(unittest.TestCase):
                 "gpuqo_snowflake_small",
                 "gpuqo_clique_small",
             ],
+        )
+        self.assertEqual(
+            list(scenarios["musicbrainz"].datasets),
+            ["musicbrainz_business"],
         )
 
     def test_print_scenarios_shows_workload_fields_only(self) -> None:
@@ -275,6 +285,11 @@ value = 1000
             ],
         )
         self.assertTrue(all(entry.variants == () for entry in resolved))
+
+    def test_musicbrainz_uses_external_database(self) -> None:
+        self.assertEqual(dataset_db_name("musicbrainz_business"), "musicbrainz_bench")
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+            dataset_prepare_scripts("musicbrainz_business")
 
     def test_dataset_resolution_uses_selected_variants_for_all_datasets(self) -> None:
         resolved = resolve_dataset_runs(

@@ -51,5 +51,13 @@ psql -d musicbrainz_bench \
   -f musicbrainz_business/queries/label_publication_lineage_record.sql
 ```
 
+Or run the registered benchmark scenario:
+
+```bash
+python3 bench/bench.py run musicbrainz \
+  --variants geqo,goo_combined,goo_combined_lindp \
+  --reuse-stats
+```
+
 The archives and loaded database are external artifacts and are not stored in
 Git.

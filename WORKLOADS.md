@@ -14,6 +14,7 @@ Dataset-level query counts and join sizes come from
 | `main` | First validation run for a new join-order algorithm | `job`, `job_complex` |
 | `extended` | Larger IMDB-backed validation after `main` looks good | `main` plus `imdb_ceb_3k` |
 | `planning` | Synthetic wide-join planning/search-space checks | `sqlite_select5`, `gpuqo_chain_small`, `gpuqo_star_small`, `gpuqo_snowflake_small`, `gpuqo_clique_small` |
+| `musicbrainz` | Business-oriented wide joins on official data | `musicbrainz_business` |
 
 `main` is the primary public validation path.  It keeps the campaign small
 enough for iteration while still covering realistic join-order choices.
@@ -28,6 +29,9 @@ mainly for planning-time and join-search-space validation.  Execution-time
 results from them are diagnostic only and should not be presented as realistic
 end-to-end workload performance.
 
+`musicbrainz` uses an externally loaded official MusicBrainz Full export. Its
+queries follow catalog business semantics and do not target fixed graph shapes.
+
 ## Workload Overview
 
 | Dataset | Queries | Join Size | Join Size >= 12 | Data | Role |
@@ -40,6 +44,7 @@ end-to-end workload performance.
 | `gpuqo_clique_small` | 150 | 2-16 | 50 | self-contained synthetic data | dense clique-shaped join graph stress, mainly useful for planning/search-space behavior |
 | `gpuqo_star_small` | 150 | 2-16 | 50 | self-contained synthetic data | star-shaped join graph stress, mainly useful for planning/search-space behavior |
 | `gpuqo_snowflake_small` | 390 | 2-40 | 290 | self-contained synthetic data | wider snowflake-shaped join graph stress, mainly useful for planning/search-space behavior |
+| `musicbrainz_business` | 44 | 12-51 | 44 | official MusicBrainz Full export | business-oriented wide joins on a real catalog |
 
 The GPUQO-derived small datasets are not bare query files without data: each
 local dataset has generated `schema.sql`, `load.sql`, and `queries/*.sql`.
@@ -68,6 +73,7 @@ file, or regenerated as smaller self-contained subsets.
 | `imdb_ceb_3k` | [learnedsystems/CEB](https://github.com/learnedsystems/CEB) | [Flow-Loss: Learning Cardinality Estimates That Matter](https://arxiv.org/abs/2101.04964) | The CEB IMDB 3k subset is stored as executable SQL query files under the shared IMDB schema. |
 | `sqlite_select5` | SQLite sqllogictest `select5` artifact [`test/select5.test`](https://www.sqlite.org/sqllogictest/artifact/5063a1dec5159873) | [Adaptive Optimization of Very Large Join Queries](https://doi.org/10.1145/3183713.3183733) | PostgreSQL conversion; see [sqlite/README.md](sqlite/README.md) for local file details. |
 | `gpuqo_chain_small`, `gpuqo_clique_small`, `gpuqo_star_small`, `gpuqo_snowflake_small` | [mageirakos/postgres-gpuqo](https://github.com/mageirakos/postgres-gpuqo) | Project-related papers: [Efficient Massively Parallel Join Optimization for Large Queries](https://arxiv.org/abs/2202.13511), [Efficient GPU-accelerated Join Optimization for Complex Queries](https://mageirakos.github.io/publication/2022-gpuqo-demo) | Small deterministic PostgreSQL subsets generated from the GPUQO synthetic workload shapes, including local `schema.sql`, `load.sql`, and query files. |
+| `musicbrainz_business` | [MusicBrainz Server](https://github.com/metabrainz/musicbrainz-server) and the [official Full export](https://ftp.musicbrainz.org/pub/musicbrainz/data/fullexport/) | — | Repository-authored business SQL over the pinned official schema and data; see [musicbrainz_business/README.md](musicbrainz_business/README.md). |
 
 ## External IMDB CSV Data
 
